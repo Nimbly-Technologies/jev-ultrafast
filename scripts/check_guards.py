@@ -1,5 +1,6 @@
 """Local-browser freshness/execution regressions. No model calls or external websites."""
 
+import time
 from urllib.parse import quote
 
 from jev_ultrafast.browser import Browser, StalePage
@@ -124,6 +125,14 @@ def main():
         assert value == "Generated", repr(value)
         assert any(a.get("role") == "option" for a in page["actions"])
         passed.append("real text input waits for asynchronous combobox suggestions")
+        # A request in flight for longer than the quiet timeout: WAIT must outlast it, then see the change.
+        page = browser.observe(screenshot=False)
+        browser.evaluate("window.__jevInflight=1; setTimeout(()=>{const p=document.createElement('p'); "
+                         "p.textContent='Loaded'; document.body.prepend(p); window.__jevInflight=0},1200)")
+        started = time.monotonic()
+        browser.wait_for_change(page)
+        assert time.monotonic() - started >= 1.2 and "Loaded" in browser.observe(screenshot=False)["text"]
+        passed.append("WAIT outlasts an in-flight request and returns once the page settles")
         browser.call("Page.navigate", url="about:blank")
         assert not browser.fresh(page, field)
         passed.append("navigation invalidates the old document")

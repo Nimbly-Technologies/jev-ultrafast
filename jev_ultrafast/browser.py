@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -12,6 +13,29 @@ from browser_harness.helpers import cdp
 # Atomically read visible content and controls, preserving actual DOM node identity.
 READ_STATE = Path(__file__).with_name("snapshot.js").read_text()
 MARKER = f"(() => {{ const state={READ_STATE}; return state?.marker ?? null; }})()"
+# How long a WAIT gives a quiet page to change; while requests are in flight it waits up to JEV_WAIT_MAX.
+WAIT_TIMEOUT = float(os.environ.get("JEV_WAIT_TIMEOUT", "3"))
+WAIT_MAX = float(os.environ.get("JEV_WAIT_MAX", "15"))
+# A changed page counts as settled once the network has been quiet this long.
+SETTLE_S = 0.3
+# Counts the page's own fetch/XHR requests still in flight, so WAIT can tell "loading" from "stuck".
+TRACK_REQUESTS = """(() => {
+  if (window.__jevInflight !== undefined) return;
+  window.__jevInflight = 0;
+  const done = () => { window.__jevInflight = Math.max(0, window.__jevInflight - 1); };
+  const fetch = window.fetch;
+  if (fetch) window.fetch = function (...args) {
+    window.__jevInflight++;
+    return fetch.apply(this, args).finally(done);
+  };
+  const send = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function (...args) {
+    window.__jevInflight++;
+    this.addEventListener('loadend', done, {once: true});
+    return send.apply(this, args);
+  };
+})()"""
+
 
 class StalePage(ValueError):
     """A decision no longer refers to the observed page."""
@@ -25,6 +49,8 @@ class Browser:
         self.call("Emulation.setDeviceMetricsOverride", width=1120, height=780, deviceScaleFactor=1, mobile=False)
         # Keep rAF/menus rendering in an owned background tab, without activating the user's Chrome tab.
         self.call("Emulation.setFocusEmulationEnabled", enabled=True)
+        self.call("Page.enable")
+        self.call("Page.addScriptToEvaluateOnNewDocument", source=TRACK_REQUESTS)
         self.call("Page.navigate", url=url)
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
@@ -101,10 +127,40 @@ class Browser:
         if not self.fresh(page, action):
             raise StalePage("Page changed since this decision. Observe again.")
         if action["kind"] == "wait":
-            time.sleep(0.1)
+            self.wait_for_change(page)
         result = browser_operation({"operation": "act", "session": self.session, "action": action, "text": text})
         self.after_input = action if action["kind"] != "wait" else None
         return result
+
+    def busy(self):
+        try:
+            return bool(self.evaluate("window.__jevInflight || 0"))
+        except StalePage:
+            return True
+
+    def wait_for_change(self, page):
+        """Wait for the page to change and then settle, not a fixed tick: a slow login or a loading spinner
+        otherwise burns one model call per tick and looks like a stuck page, and the policy wanders off.
+
+        Returns once the page has changed and the network has been quiet for SETTLE_S; or, if nothing
+        changes, after WAIT_TIMEOUT of quiet. While requests are in flight it keeps waiting, up to WAIT_MAX.
+        """
+        started = time.monotonic()
+        quiet_since = started
+        while time.monotonic() - started < WAIT_MAX:
+            time.sleep(0.05)
+            now = time.monotonic()
+            if self.busy():
+                quiet_since = None
+                continue
+            quiet_since = quiet_since or now
+            quiet = now - quiet_since
+            try:
+                changed = not self.fresh(page)
+            except StalePage:
+                changed = True
+            if (changed and quiet >= SETTLE_S) or quiet >= WAIT_TIMEOUT:
+                return
 
     def close(self):
         if self.target:
