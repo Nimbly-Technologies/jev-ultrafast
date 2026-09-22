@@ -7,6 +7,7 @@ from pathlib import Path
 from .browser import Browser, StalePage
 from .model import action_space, choose, field_context, field_text
 from .questions import MAX_STEPS
+from .secrets import MASK, secret_for
 
 
 class Agent:
@@ -103,7 +104,10 @@ class Agent:
                 state["status"] = "blocked"
                 raise ValueError(f"Stopped at the {MAX_STEPS}-action demo budget")
             text, helper = None, None
-            if action["kind"] == "fill":
+            if action["kind"] == "fill" and action.get("secret"):
+                # A secret is read locally and typed. No model sees it, and the trace records only a mask.
+                text = secret_for(action["label"])
+            elif action["kind"] == "fill":
                 if not state["browser"].fresh(page):
                     raise StalePage("Page changed before text generation. Choose again.")
                 context = field_context(state["goal"], action, page, state["history"])
@@ -127,7 +131,7 @@ class Agent:
                     "probability": decision["probabilities"][selected],
                     "confidence": decision["confidence"],
                     "latency_ms": decision["latency_ms"],
-                    "text": text,
+                    "text": MASK if action.get("secret") else text,
                     "text_helper": helper["model"] if helper else None,
                     "text_latency_ms": helper["latency_ms"] if helper else 0,
                     "operation": decision["operation"],
