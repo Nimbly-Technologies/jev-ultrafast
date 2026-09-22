@@ -63,7 +63,7 @@ uv run jev
 
 Open **http://127.0.0.1:8766** and click **Start demo → Run automatically**. The inspector shows numbered elements, operation probabilities, target probabilities, and executed actions. **Choose next** pauses before execution.
 
-Chrome connects through [Browser Harness](https://github.com/browser-use/browser-harness), installed by `uv sync`. Run `uv run browser-harness --doctor` if it needs connecting. Allow remote debugging in Chrome when prompted.
+Chrome connects over raw CDP ([cdp.py](jev_ultrafast/cdp.py)): one WebSocket to `CDP_URL`, a Chrome started with `--remote-debugging-port`. Set `CDP_SSH=user@host` to reach a Chrome on another machine through an SSH tunnel; `CDP_URL` is then the endpoint as seen from that host.
 
 `TEXT_MODEL_API_KEY` is an OpenRouter key in the example configuration. The current demo uses `inception/mercury-2.5` with reasoning disabled. Gemini, GLM, and DeepSeek can also use the OpenAI-compatible text helper; configure the appropriate model, endpoint, and reasoning setting.
 
@@ -98,7 +98,7 @@ uv run --env-file .env python examples/run.py \
 - **One browser call per snapshot.** Read visible controls, their names, values, and text atomically. Keep references to the actual DOM nodes.
 - **Validate the selected target.** Clicks check the document, form values, target, and nearby context. Animation alone does not force another prediction. Resolve current geometry and reject covered controls before input.
 - **Wait for useful state.** After typing into a combobox, wait for visible suggestions, capped at 200 ms. Other interactions get at most two animation frames or 50 ms. These reads happen after execution is logged.
-- **Keep hidden tabs rendering.** Focus emulation prevents background animation throttling without switching Chrome's visible tab.
+- **Keep the agent's page rendering.** The agent owns its own window, plus focus emulation. An occluded background tab throttles animation frames to roughly 2/s on some browsers, freezing menus mid-fade. `CDP_WINDOW=0` restores the background tab.
 - **Send visible text.** Offscreen article bodies and footers do not fill the model context.
 - **Reuse an interrupted text request.** A generated value survives a stale-page retry only if the entire text-helper input is unchanged.
 
@@ -110,7 +110,8 @@ Every executed target is resolved from an observed node. The executor rechecks p
 | --- | --- |
 | [agent.py](jev_ultrafast/agent.py) | The complete loop and text-helper handoff |
 | [snapshot.js](jev_ultrafast/snapshot.js) | Atomic DOM snapshot, indexed controls, freshness guards |
-| [browser.py](jev_ultrafast/browser.py) | Browser connection, current geometry, execution |
+| [browser.py](jev_ultrafast/browser.py) | Browser session, current geometry, execution |
+| [cdp.py](jev_ultrafast/cdp.py) | Direct CDP WebSocket, optional SSH tunnel |
 | [model.py](jev_ultrafast/model.py) | Dynamic operation/target heads and text generation |
 | [questions.py](jev_ultrafast/questions.py) | Model instructions |
 | [demo.py](jev_ultrafast/demo.py) | Local inspector |

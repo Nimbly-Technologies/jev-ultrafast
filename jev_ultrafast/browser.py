@@ -1,13 +1,12 @@
-"""Observed actions through Browser Harness; one CDP session, no per-step subprocess."""
+"""Observed actions over direct CDP (local or via SSH tunnel); one session, no per-step subprocess."""
 
 import hashlib
 import json
-import sys
+import os
 import time
 from pathlib import Path
 
-from browser_harness.admin import ensure_daemon
-from browser_harness.helpers import cdp
+from .cdp import cdp, connection
 
 # Atomically read visible content and controls, preserving actual DOM node identity.
 READ_STATE = Path(__file__).with_name("snapshot.js").read_text()
@@ -19,8 +18,11 @@ class StalePage(ValueError):
 
 class Browser:
     def __init__(self, url):
-        ensure_daemon()
-        self.target = cdp("Target.createTarget", url="about:blank", background=True)["targetId"]
+        connection()
+        # An occluded background tab throttles animation frames to ~2/s on some browsers, which freezes
+        # menu and suggestion animations mid-fade. Own a window instead; CDP_WINDOW=0 restores a background tab.
+        window = os.environ.get("CDP_WINDOW", "1") != "0"
+        self.target = cdp("Target.createTarget", url="about:blank", background=not window, newWindow=window)["targetId"]
         self.session = cdp("Target.attachToTarget", targetId=self.target, flatten=True)["sessionId"]
         self.call("Emulation.setDeviceMetricsOverride", width=1120, height=780, deviceScaleFactor=1, mobile=False)
         # Keep rAF/menus rendering in an owned background tab, without activating the user's Chrome tab.
@@ -167,12 +169,14 @@ def browser_operation(request):
                 for event in ("mousePressed", "mouseReleased"):
                     call("Input.dispatchMouseEvent", type=event, x=x, y=y, button="left", clickCount=1)
                 if kind == "fill":
+                    # Select-all follows the browser's OS, which may differ from this machine's.
+                    select_all = 4 if "Macintosh" in connection().user_agent else 2
                     call(
                         "Input.dispatchKeyEvent",
                         type="keyDown",
                         key="a",
                         code="KeyA",
-                        modifiers=4 if sys.platform == "darwin" else 2,
+                        modifiers=select_all,
                         commands=["selectAll"],
                     )
                     call(
@@ -180,7 +184,7 @@ def browser_operation(request):
                         type="keyUp",
                         key="a",
                         code="KeyA",
-                        modifiers=4 if sys.platform == "darwin" else 2,
+                        modifiers=select_all,
                     )
                     call("Input.insertText", text=request["text"])
         return {"executed": action["id"]}
