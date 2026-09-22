@@ -157,6 +157,18 @@ def field_context(goal, action, page, history):
     }
 
 
+def parse_field_value(result):
+    """A valid helper answer is a JSON object with exactly one string key, text."""
+    try:
+        output = json.loads(result["choices"][0]["message"]["content"])
+        value = output["text"]
+        if set(output) != {"text"} or not isinstance(value, str) or not value.strip() or len(value) > 2000:
+            raise ValueError()
+    except (ValueError, KeyError, TypeError):
+        raise ValueError("Text helper returned no valid field value; nothing typed.") from None
+    return value
+
+
 def field_text(context):
     key = os.environ.get("TEXT_MODEL_API_KEY")
     if not key:
@@ -166,31 +178,24 @@ def field_text(context):
     reasoning = {"thinking": {"type": "disabled"}} if "api.deepseek.com/" in base else {"reasoning": {"effort": "low"}}
     if os.environ.get("TEXT_MODEL_REASONING") == "none":
         reasoning = {"reasoning": {"enabled": False}}
+    request = {
+        "model": model,
+        "max_tokens": 1024,
+        "response_format": {"type": "json_object"},
+        **reasoning,
+        "messages": [
+            {"role": "system", "content": TEXT_VALUE},
+            {"role": "user", "content": json.dumps(context)},
+        ],
+    }
     started = time.perf_counter()
-    result = post_json(
-        base + "/chat/completions",
-        key,
-        {
-            "model": model,
-            "max_tokens": 1024,
-            "response_format": {"type": "json_object"},
-            **reasoning,
-            "messages": [
-                {"role": "system", "content": TEXT_VALUE},
-                {
-                    "role": "user",
-                    "content": json.dumps(context),
-                },
-            ],
-        },
-    )
+    result = post_json(base + "/chat/completions", key, request)
     try:
-        output = json.loads(result["choices"][0]["message"]["content"])
-        value = output["text"]
-        if set(output) != {"text"} or not isinstance(value, str) or not value.strip() or len(value) > 2000:
-            raise ValueError()
-    except (ValueError, KeyError, TypeError):
-        raise ValueError("Text helper returned no valid field value; nothing typed.") from None
+        value = parse_field_value(result)
+    except ValueError:
+        # One retry: nothing was typed, so no browser state depends on the discarded answer.
+        result = post_json(base + "/chat/completions", key, request)
+        value = parse_field_value(result)
     return value, {
         "model": model,
         "latency_ms": round((time.perf_counter() - started) * 1000),
