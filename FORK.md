@@ -14,13 +14,14 @@ Everything site-specific lives there, not here.
 | --- | --- | --- |
 | Raw CDP client (`cdp.py`) replaces browser-harness | One WebSocket, no daemon; optional SSH tunnel (`CDP_SSH`) to a remote Chrome | no, a design choice upstream may not want |
 | Agent owns a window, not a background tab | An occluded tab gets ~2 animation frames/s (0 when headless), freezing menus mid-fade | with the CDP change |
-| Password fields observable, values masked; `JEV_SECRETS` vault | Stock jev cannot log in anywhere; the secret never reaches a model, trace or history | yes |
-| `WAIT` waits for a real page change (`JEV_WAIT_TIMEOUT`, 3 s) | A 100 ms tick burned one model call per tick on a slow redirect, then the policy wandered | yes |
-| One retry for an unparseable text-helper value | Aborted whole runs; nothing is typed yet | yes |
-| One retry for an invalid TypeSafe answer | Same failure on the choice head; nothing has executed yet | yes |
+| Password fields observable, values masked; `JEV_SECRETS` vault | Stock jev cannot log in anywhere; the secret never reaches a model, trace or history | [#123](https://github.com/browser-use/jev-ultrafast/pull/123) |
+| `WAIT` waits for the page to change and the network to settle (`JEV_WAIT_TIMEOUT` 3 s quiet, `JEV_WAIT_MAX` 15 s) | A 100 ms tick burned one model call per tick on a slow redirect, then the policy wandered | [#124](https://github.com/browser-use/jev-ultrafast/pull/124) |
+| One retry for an unparseable text-helper value | Aborted whole runs; nothing is typed yet | no, [#73](https://github.com/browser-use/jev-ultrafast/pull/73) covers retries |
+| One retry for an invalid TypeSafe answer | Same failure on the choice head; nothing has executed yet | no, as above |
 | `Agent(browser=...)`, `pursue(goal)`, `act(instruction)` | A test interleaves goals with its own assertions on one page; `act` executes exactly one action, like Stagehand's `act()` | maybe |
 | Step, model-call and wall-clock budgets; stop reasons; `diagnose()` | A wandering run must not spend unbounded money, and a flake must say why it stopped | maybe |
 | `Browser.goto/run/click_at/press/insert_text/screenshot`, `isolated_context()` | The deterministic escape hatch a test uses for steps it already knows, and per-test isolation | no |
+| Scripted clickable elements (outermost `cursor: pointer`) observed as buttons | Cards, tiles and avatars with a script handler and no role were invisible | no, [#22](https://github.com/browser-use/jev-ultrafast/pull/22)/[#24](https://github.com/browser-use/jev-ultrafast/pull/24) are open |
 | `JEV_VIEWPORT` | The QA suite runs at 1280x800, as its Stagehand predecessor did | no |
 
 ## API added for tests
@@ -41,3 +42,6 @@ page.close()                                      # also closes any window the p
 `act()` returning `status == "done"` with `actions == 0` means the model judged the instruction already
 satisfied and executed nothing. `diagnose()` reports repeated actions, URL revisits and no-change actions;
 it never changes a run's outcome.
+
+Upstream has not merged an outside pull request yet (only maintainer commits through #30), so everything
+above is carried here until it does.
