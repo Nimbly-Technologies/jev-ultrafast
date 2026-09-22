@@ -51,6 +51,17 @@ def main():
         browser.act(header, page)
         assert browser.evaluate("window.expanded") == 1
         passed.append("an element with an onclick handler but no pointer cursor is clickable")
+        browser.evaluate("""const box=document.createElement('div');
+          box.style.cssText='position:relative;width:220px;height:36px;border:1px solid';
+          box.innerHTML='<span style=\"position:absolute;inset:0\">Select...</span>'+
+            '<input aria-label=\"Timezone\" style=\"width:2px;opacity:1;border:0;padding:0\">';
+          box.addEventListener('mousedown',()=>{window.opened=1});
+          document.body.prepend(box)""")
+        page = browser.observe(screenshot=False)
+        tiny = next(a for a in page["actions"] if a["label"] == "Open Timezone")
+        browser.act(tiny, page)
+        assert browser.evaluate("window.opened") == 1
+        passed.append("a pixel-wide input is pressed through its visible container")
         page = browser.observe(screenshot=False)
 
         browser.evaluate("document.querySelector('#outside').textContent='Updated outside the viewport'")

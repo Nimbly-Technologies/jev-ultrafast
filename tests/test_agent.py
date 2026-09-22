@@ -475,3 +475,24 @@ def test_act_frames_its_instruction_as_one_step_and_pursue_as_a_goal(monkeypatch
     a.act("Click Go")
     a.pursue("Finish")
     assert seen == [STEP, NEXT_ACTION]
+
+
+@pytest.mark.parametrize(("rules", "goal", "vault"), [
+    ("step", "Fill the password field", True),
+    ("step", "Fill the password field with 'Temp-123'", False),
+    ("goal", 'Log in as "ada@example.com"', True),
+])
+def test_quoted_value_overrides_the_vault_only_for_a_single_step(runner, monkeypatch, rules, goal, vault):
+    from jev_ultrafast.questions import NEXT_ACTION, STEP
+
+    monkeypatch.setenv("JEV_SECRETS", '{"password": "hunter2"}')
+    helper = Mock(return_value=("Temp-123", {"model": "t", "latency_ms": 1}))
+    monkeypatch.setattr(loop, "field_text", helper)
+    runner.state.update(goal=goal, rules=STEP if rules == "step" else NEXT_ACTION)
+    p = runner.state["page"]
+    p["actions"].insert(0, {"id": "pw", "kind": "fill", "label": "Password", "role": "textbox", "value": "",
+                            "node": 40, "secret": True})
+    runner.state["decision"] = decision("pw")
+    runner.command("act", {"fingerprint": p["fingerprint"]})
+    typed = runner.state["browser"].act.call_args.kwargs["text"]
+    assert (typed == "hunter2") is vault and helper.called is not vault

@@ -293,9 +293,18 @@ def browser_operation(request):
               if (!e?.isConnected || e.matches(':disabled') || e.closest('[aria-disabled="true"],[inert]') ||
                   !e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})) return null;
               if (action.kind==='fill' && (e.readOnly || e.getAttribute('aria-readonly')==='true')) return null;
-              const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2;
+              // A select-style widget's real input can be a couple of pixels wide under its own placeholder;
+              // press it through the smallest ancestor a user could actually click.
+              let hit=e, r=e.getBoundingClientRect();
+              if (r.width && r.height && (r.width<8 || r.height<8)) {
+                for (let a=e.parentElement; a && a!==document.body; a=a.parentElement) {
+                  const q=a.getBoundingClientRect();
+                  if (q.width>=20 && q.height>=16) { hit=a; r=q; break; }
+                }
+              }
+              const x=r.x+r.width/2, y=r.y+r.height/2;
               if (!r.width || !r.height || x<0 || y<0 || x>=innerWidth || y>=innerHeight) return null;
-              if (!e.contains(document.elementFromPoint(x,y))) return null;
+              if (!hit.contains(document.elementFromPoint(x,y))) return null;
               if (action.kind==='select') {
                 if (e.tagName!=='SELECT' || ![...e.options].some(o=>o.value===action.value &&
                     !o.disabled && !o.closest('optgroup[disabled]'))) return null;

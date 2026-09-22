@@ -1,6 +1,7 @@
 """The complete agent loop. Typed choices, observable state, bounded execution."""
 
 import base64
+import re
 import time
 from pathlib import Path
 
@@ -92,6 +93,9 @@ class Agent:
             except StalePage:
                 state["decision"] = None
                 state["status"] = "ready"
+                # The target moved, was covered (a toast, an animation) or the page is navigating. Give it a
+                # chance to settle before asking again, or the same refused choice burns the call budget.
+                state["browser"].wait_for_change(state["page"])
                 state["page"] = state["browser"].observe(screenshot=self.screenshots)
                 state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
                 return self.snapshot()
@@ -140,7 +144,7 @@ class Agent:
             if len(state["history"]) >= max_steps:
                 self._stop(f"Stopped at the {max_steps}-action budget")
             text, helper = None, None
-            if action["kind"] == "fill" and action.get("secret"):
+            if action["kind"] == "fill" and action.get("secret") and not quoted_value(state):
                 # A secret is read locally and typed. No model sees it, and the trace records only a mask.
                 text = secret_for(action["label"])
             elif action["kind"] == "fill":
@@ -286,6 +290,13 @@ class Agent:
 
     def __exit__(self, *_args):
         self.close()
+
+
+def quoted_value(state):
+    """A single-step instruction that quotes the value to type ("Fill the password field with 'Temp-123'") is
+    setting a new secret, not using the stored one; it is already in the instruction, so the text helper may
+    read it. Multi-step goals never qualify, so a quoted email in a login goal cannot leak into a password."""
+    return state.get("rules") == STEP and bool(re.search(r"\"[^\"]+\"|'[^']+'", state["goal"]))
 
 
 def usage(state):
