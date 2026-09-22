@@ -1,5 +1,6 @@
 """Observed actions over direct CDP (local or via SSH tunnel); one session, no per-step subprocess."""
 
+import base64
 import hashlib
 import json
 import os
@@ -18,23 +19,101 @@ class StalePage(ValueError):
     """A decision no longer refers to the observed page."""
 
 
+class JavaScriptError(RuntimeError):
+    """Caller-supplied JavaScript threw. Unlike StalePage, this is the script's fault, not the page's."""
+
+
+def viewport():
+    width, _, height = os.environ.get("JEV_VIEWPORT", "1120x780").partition("x")
+    return int(width), int(height)
+
+
 class Browser:
-    def __init__(self, url):
+    """One page in its own window. ``context`` is a browser context id from ``isolated_context()``; pages in
+    the default context share cookies and storage, pages in an isolated one share nothing."""
+
+    def __init__(self, url="about:blank", *, context=None):
         connection()
         # An occluded background tab throttles animation frames to ~2/s on some browsers, which freezes
         # menu and suggestion animations mid-fade. Own a window instead; CDP_WINDOW=0 restores a background tab.
         window = os.environ.get("CDP_WINDOW", "1") != "0"
-        self.target = cdp("Target.createTarget", url="about:blank", background=not window, newWindow=window)["targetId"]
+        extra = {"browserContextId": context} if context else {}
+        self.target = cdp(
+            "Target.createTarget", url="about:blank", background=not window, newWindow=window, **extra
+        )["targetId"]
         self.session = cdp("Target.attachToTarget", targetId=self.target, flatten=True)["sessionId"]
-        self.call("Emulation.setDeviceMetricsOverride", width=1120, height=780, deviceScaleFactor=1, mobile=False)
+        width, height = viewport()
+        self.call("Emulation.setDeviceMetricsOverride", width=width, height=height, deviceScaleFactor=1, mobile=False)
         # Keep rAF/menus rendering in an owned background tab, without activating the user's Chrome tab.
         self.call("Emulation.setFocusEmulationEnabled", enabled=True)
+        self.goto(url, timeout=15, required=False)
+
+    def goto(self, url, *, timeout=30, required=True):
+        """Navigate and wait for the load event's readyState. Raises on timeout unless not required."""
+        # Page.navigate returns once the new document has committed, so readyState belongs to it.
         self.call("Page.navigate", url=url)
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if self.evaluate("document.readyState") == "complete":
-                break
+            try:
+                if self.evaluate("document.readyState") == "complete":
+                    return
+            except StalePage:
+                pass
             time.sleep(0.02)
+        if required:
+            raise TimeoutError(f"{url} did not finish loading within {timeout}s")
+
+    @property
+    def url(self):
+        return self.evaluate("location.href")
+
+    def title(self):
+        return self.evaluate("document.title")
+
+    def text(self):
+        return self.evaluate("document.body ? document.body.innerText : ''") or ""
+
+    def run(self, function, *args, timeout=30):
+        """Call a JavaScript function source with JSON arguments; await it if it returns a promise.
+
+        This is the deterministic escape hatch for steps a test already knows how to address. It is never
+        reachable from a model: no model output is ever passed here.
+        """
+        expression = f"({function})(...{json.dumps(list(args))})"
+        response = cdp(
+            "Runtime.evaluate", session_id=self.session, timeout=timeout + 5, expression=expression,
+            returnByValue=True, awaitPromise=True, userGesture=True,
+        )
+        if response.get("exceptionDetails"):
+            details = response["exceptionDetails"]
+            message = details.get("exception", {}).get("description") or details.get("text", "")
+            raise JavaScriptError(message.split("\n")[0])
+        return response.get("result", {}).get("value")
+
+    def click_at(self, x, y, *, count=1):
+        for event in ("mousePressed", "mouseReleased"):
+            self.call("Input.dispatchMouseEvent", type=event, x=x, y=y, button="left", clickCount=count)
+
+    def press(self, key, code=None, key_code=None, text=None):
+        """Press one key, e.g. press("Enter", "Enter", 13, "\\r") or press("Escape", "Escape", 27)."""
+        params = {"key": key, "code": code or key}
+        if key_code:
+            params["windowsVirtualKeyCode"] = key_code
+        self.call("Input.dispatchKeyEvent", type="keyDown", **params, **({"text": text} if text else {}))
+        self.call("Input.dispatchKeyEvent", type="keyUp", **params)
+
+    def insert_text(self, text):
+        self.call("Input.insertText", text=text)
+
+    def screenshot(self, path=None):
+        data = self.call("Page.captureScreenshot", format="png")["data"]
+        if path:
+            Path(path).write_bytes(base64.b64decode(data))
+        return data
+
+    def opened_targets(self):
+        """Pages this page opened (window.open, target=_blank), which a test should not leave behind."""
+        return [t for t in cdp("Target.getTargets")["targetInfos"] if t.get("openerId") == self.target]
 
     def call(self, method, **params):
         return cdp(method, session_id=self.session, **params)
@@ -118,8 +197,19 @@ class Browser:
 
     def close(self):
         if self.target:
+            for opened in self.opened_targets():
+                cdp("Target.closeTarget", targetId=opened["targetId"])
             cdp("Target.closeTarget", targetId=self.target)
             self.target = None
+
+
+def isolated_context():
+    """A fresh browser context: no cookies, storage or cache shared with any other page."""
+    return cdp("Target.createBrowserContext", disposeOnDetach=False)["browserContextId"]
+
+
+def dispose_context(context):
+    cdp("Target.disposeBrowserContext", browserContextId=context)
 
 
 def fingerprint(state):

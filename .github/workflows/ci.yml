@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # GitHub-hosted on purpose: this repository is public, and a self-hosted runner would execute
+    # pull-request code from strangers on our infrastructure.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      # Offline: tests never call a paid API.
+      - run: uv run pytest -q
+      - run: node --check jev_ultrafast/static/app.js && node --check jev_ultrafast/snapshot.js
+      - run: uv build

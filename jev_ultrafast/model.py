@@ -79,6 +79,19 @@ def action_space(actions):
     return elements, targets, controls
 
 
+def read_answers(result, operations, targets):
+    """Validate the operation head, then only the target head that operation selects."""
+    answers = result.get("answers") if isinstance(result, dict) else None
+    if not isinstance(answers, dict):
+        raise ValueError("Invalid TypeSafe response; no action executed.")
+    operation_answer = validate_choice(answers.get("operation", {}), operations)
+    operation = operation_answer["choice"]
+    if operation not in targets:
+        return operation_answer, None
+    # Unused target heads cannot cause an action. Validate the head selected by the operation.
+    return operation_answer, validate_choice(answers.get(operation.lower() + "_target", {}), targets[operation])
+
+
 def choose(state, goal, history):
     elements, targets, controls = action_space(state["actions"])
     labels = {
@@ -121,15 +134,21 @@ def choose(state, goal, history):
         "questions": questions,
     }
     started = time.perf_counter()
-    result = post_json("https://api.typesafe.ai/v1/systemone", os.environ["TYPESAFE_API_KEY"], body)
-    operation_answer = validate_choice(result["answers"].get("operation", {}), operations)
+    spent = []
+    for attempt in range(2):
+        result = post_json("https://api.typesafe.ai/v1/systemone", os.environ["TYPESAFE_API_KEY"], body)
+        spent.append(result.get("usage", {}) if isinstance(result, dict) else {})
+        try:
+            operation_answer, target_answer = read_answers(result, operations, targets)
+            break
+        except ValueError:
+            # One retry: nothing has executed, so asking again cannot repeat a browser mutation.
+            if attempt:
+                raise
     operation = operation_answer["choice"]
     target = None
-    target_answer = None
     probabilities = {}
-    if operation in targets:
-        # Unused target heads cannot cause an action. Validate the head selected by the operation.
-        target_answer = validate_choice(result["answers"].get(operation.lower() + "_target", {}), targets[operation])
+    if target_answer:
         target = target_answer["choice"]
         choice = targets[operation][target]["id"]
         probabilities = {a["id"]: target_answer["probabilities"][index] for index, a in targets[operation].items()}
@@ -147,7 +166,9 @@ def choose(state, goal, history):
         "target_confidence": target_answer["confidence"] if target_answer else None,
         "raw_answers": result["answers"],
         "model": result["model"],
-        "usage": result.get("usage", {}),
+        # A retried request is billed too, so usage covers every attempt.
+        "usage": {k: sum(u.get(k, 0) for u in spent) for k in {k for u in spent for k in u}},
+        "attempts": len(spent),
         "latency_ms": round((time.perf_counter() - started) * 1000),
         "request": body,
     }
@@ -188,6 +209,8 @@ def field_text(context):
         "max_tokens": 1024,
         "response_format": {"type": "json_object"},
         **reasoning,
+        # OpenRouter reports each call's own cost only when asked.
+        **({"usage": {"include": True}} if "openrouter.ai" in base else {}),
         "messages": [
             {"role": "system", "content": TEXT_VALUE},
             {"role": "user", "content": json.dumps(context)},

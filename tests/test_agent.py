@@ -322,3 +322,95 @@ def test_navigation_during_prediction_reobserves_without_action(runner):
     assert runner.state["status"] == "ready"
     assert runner.state["decision"] is None
     runner.state["browser"].act.assert_not_called()
+
+
+def test_invalid_typesafe_answer_is_asked_again_once(monkeypatch):
+    replies = [{"model": "test", "answers": {"operation": {"choice": "invented"}}, "usage": {"input_tokens": 5}}]
+
+    def post(_url, _key, body):
+        if replies:
+            return replies.pop()
+        return {
+            "model": "test",
+            "answers": {"operation": choice(body["questions"]["operation"]["criteria"], "WAIT")},
+            "usage": {"input_tokens": 7},
+        }
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setattr(model, "post_json", post)
+    d = model.choose(page(), "Find a book", [])
+    assert d["choice"] == "wait" and d["attempts"] == 2
+    assert d["usage"]["input_tokens"] == 12
+
+
+def test_second_invalid_typesafe_answer_stops(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setattr(model, "post_json", Mock(return_value={"model": "test", "answers": {}}))
+    with pytest.raises(ValueError, match="Invalid TypeSafe"):
+        model.choose(page(), "Find a book", [])
+    assert model.post_json.call_count == 2
+
+
+def scripted_agent(monkeypatch, choices):
+    """An agent on a fake browser whose model returns the given choices in order."""
+    p = page()
+    browser = Mock(fresh=Mock(return_value=True), observe=Mock(return_value=p))
+    a = loop.Agent(browser=browser)
+    pending = list(choices)
+
+    def choose(*_args):
+        selected = pending.pop(0)
+        return {**decision(selected), "operation": "CLICK" if selected.startswith("e") else selected.upper()}
+
+    monkeypatch.setattr(loop, "choose", choose)
+    monkeypatch.setattr(loop, "field_text", Mock(return_value=("book", {"model": "t", "latency_ms": 1})))
+    return a, browser
+
+
+def test_act_takes_waits_then_exactly_one_action(monkeypatch):
+    a, browser = scripted_agent(monkeypatch, ["wait", "wait", "e3", "e3"])
+    result = a.act("Click Go")
+    assert result["status"] == "done" and result["actions"] == 3
+    assert [h["kind"] for h in result["history"]] == ["wait", "wait", "click"]
+    assert browser.act.call_count == 3  # The second e3 is never consulted.
+
+
+def test_act_done_executes_nothing(monkeypatch):
+    a, browser = scripted_agent(monkeypatch, ["DONE"])
+    result = a.act("Click Go")
+    assert result["status"] == "done" and result["actions"] == 0
+    browser.act.assert_not_called()
+
+
+def test_act_budget_blocks_without_raising(monkeypatch):
+    a, _ = scripted_agent(monkeypatch, ["wait"] * 10)
+    result = a.act("Click Go", max_model_calls=3)
+    assert result["status"] == "blocked" and "3-call" in result["reason"]
+
+
+def test_pursue_budgets_do_not_leak_between_goals(monkeypatch):
+    a, _ = scripted_agent(monkeypatch, ["wait"] * 3 + ["e3", "DONE"])
+    assert a.act("Wait", max_model_calls=3)["status"] == "blocked"
+    result = a.pursue("Click Go")
+    assert result["status"] == "done" and result["reason"].startswith("Model chose DONE")
+    assert a.budget["max_model_calls"] is None
+    assert [entry["goal"] for entry in a.log] == ["Wait"]
+
+
+def test_attached_agent_leaves_the_page_open(monkeypatch):
+    a, browser = scripted_agent(monkeypatch, [])
+    a.close()
+    browser.close.assert_not_called()
+
+
+def test_diagnostics_report_repeats_and_revisits():
+    history = [
+        {"step": 1, "kind": "click", "action": "Read More", "url": "https://a/", "page_changed": True},
+        {"step": 2, "kind": "click", "action": "Back", "url": "https://a/b", "page_changed": True},
+        {"step": 3, "kind": "click", "action": "Read More", "url": "https://a/", "page_changed": False},
+        {"step": 4, "kind": "wait", "action": "Wait", "url": "https://a/", "page_changed": False},
+    ]
+    d = loop.diagnose(history)
+    assert d["repeated_actions"] == [{"action": "Read More", "kind": "click", "first_repeat_step": 3}]
+    assert d["url_revisits"] == [{"url": "https://a/", "step": 3}]
+    assert d["no_change_actions"] == [3] and d["waits"] == 1
