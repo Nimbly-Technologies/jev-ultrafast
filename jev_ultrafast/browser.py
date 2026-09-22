@@ -11,6 +11,8 @@ from .cdp import cdp, connection
 # Atomically read visible content and controls, preserving actual DOM node identity.
 READ_STATE = Path(__file__).with_name("snapshot.js").read_text()
 MARKER = f"(() => {{ const state={READ_STATE}; return state?.marker ?? null; }})()"
+# How long a WAIT action gives the page to change before observing again.
+WAIT_TIMEOUT = float(os.environ.get("JEV_WAIT_TIMEOUT", "3"))
 
 class StalePage(ValueError):
     """A decision no longer refers to the observed page."""
@@ -103,7 +105,13 @@ class Browser:
         if not self.fresh(page, action):
             raise StalePage("Page changed since this decision. Observe again.")
         if action["kind"] == "wait":
-            time.sleep(0.1)
+            # Wait for the page to actually change, not a fixed tick: a slow login or a loading
+            # spinner otherwise burns one model call per 100 ms and looks like a stuck page.
+            deadline = time.monotonic() + WAIT_TIMEOUT
+            while time.monotonic() < deadline:
+                time.sleep(0.05)
+                if not self.fresh(page):
+                    break
         result = browser_operation({"operation": "act", "session": self.session, "action": action, "text": text})
         self.after_input = action if action["kind"] != "wait" else None
         return result
