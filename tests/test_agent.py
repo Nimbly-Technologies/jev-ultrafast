@@ -414,3 +414,46 @@ def test_diagnostics_report_repeats_and_revisits():
     assert d["repeated_actions"] == [{"action": "Read More", "kind": "click", "first_repeat_step": 3}]
     assert d["url_revisits"] == [{"url": "https://a/", "step": 3}]
     assert d["no_change_actions"] == [3] and d["waits"] == 1
+def test_secret_value_comes_from_the_vault_by_label(monkeypatch):
+    from jev_ultrafast.secrets import secret_for
+
+    monkeypatch.setenv("JEV_SECRETS", '{"password": "hunter2"}')
+    assert secret_for("Password") == "hunter2"
+    with pytest.raises(ValueError, match="No secret configured"):
+        secret_for("Email")
+    monkeypatch.setenv("JEV_SECRETS", "not json")
+    with pytest.raises(ValueError, match="not valid JSON"):
+        secret_for("Password")
+
+
+def test_secret_field_is_typed_from_the_vault_and_masked_in_history(runner, monkeypatch):
+    monkeypatch.setenv("JEV_SECRETS", '{"password": "hunter2"}')
+    helper = Mock()
+    monkeypatch.setattr(loop, "field_text", helper)
+    p = runner.state["page"]
+    p["actions"].insert(0, {"id": "pw", "kind": "fill", "label": "Password", "role": "textbox", "value": "",
+                            "node": 40, "secret": True})
+    runner.state["decision"] = decision("pw")
+    runner.command("act", {"fingerprint": p["fingerprint"]})
+    helper.assert_not_called()  # No model ever sees or writes the secret.
+    assert runner.state["browser"].act.call_args.kwargs["text"] == "hunter2"
+    assert runner.state["history"][-1]["text"] == "(secret)"
+    assert "hunter2" not in json.dumps(runner.state["history"])
+
+
+def test_policy_is_told_which_fields_are_secret(monkeypatch):
+    p = page()
+    p["actions"].insert(0, {"id": "pw", "kind": "fill", "label": "Password", "role": "textbox", "value": "",
+                            "node": 40, "secret": True})
+    seen = {}
+
+    def post(_url, _key, body):
+        seen.update(body)
+        return {"model": "test", "answers": {"operation": choice(body["questions"]["operation"]["criteria"], "WAIT")}}
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setattr(model, "post_json", post)
+    model.choose(p, "Log in", [])
+    assert seen["state"]["elements"][0]["secret"] is True
+    assert seen["questions"]["type_text_target"]["criteria"]["1"]["secret"] is True
+    assert "secret" in seen["questions"]["operation"]["criteria"]["TYPE_TEXT"]
