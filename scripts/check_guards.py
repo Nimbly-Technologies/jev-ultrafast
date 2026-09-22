@@ -14,6 +14,10 @@ HTML = """<!doctype html><title>Guard checks</title>
 <select aria-label="Category"><option>All</option><option>Design</option></select>
 <div id="card" style="cursor:pointer" onclick="window.cards=(window.cards||0)+1"><span>Issue Insights</span>
 <span>Spot trends</span></div>
+<nav><div id="menu" style="cursor:pointer;position:relative;width:200px">User Management
+<div style="position:absolute;top:24px;left:0;width:260px;background:#eee">
+<div onclick="window.item='Users'"><div><b>Users</b> Add and edit users</div></div>
+<div onclick="window.item='User Groups'"><div><b>User Groups</b> Manage groups</div></div></div></div></nav>
 <p id="outside">Unrelated offscreen text</p>"""
 
 
@@ -34,6 +38,12 @@ def main():
         browser.act(cards[0], page)
         assert browser.evaluate("window.cards") == 1
         passed.append("a scripted pointer-cursor card is one clickable element")
+        page = browser.observe(screenshot=False)
+        items = [a for a in page["actions"] if a["label"].startswith("User Groups")]
+        assert len(items) == 1, [a["label"] for a in page["actions"]]
+        browser.act(items[0], page)
+        assert browser.evaluate("window.item") == "User Groups"
+        passed.append("items of a scripted menu nested in its trigger are separate clickable elements")
         page = browser.observe(screenshot=False)
 
         browser.evaluate("document.querySelector('#outside').textContent='Updated outside the viewport'")

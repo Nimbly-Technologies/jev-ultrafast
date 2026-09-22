@@ -67,6 +67,26 @@
         (e.parentElement && pointer(e.parentElement))) continue;
     scripted.add(e); candidates.push(e);
   }
+  // A scripted menu often nests its items inside the trigger (a hover dropdown under a nav tab), so they all
+  // inherit its pointer and would collapse into it. Items rendered outside the trigger's own box are a
+  // separate surface: split that surface into its items, one per child that carries its own text.
+  const inside=(a,b)=>a.left>=b.left-1 && a.right<=b.right+1 && a.top>=b.top-1 && a.bottom<=b.bottom+1;
+  const texty=e=>(e.innerText||'').trim()!=='';
+  const split=e=>{
+    const items=[...e.children].filter(k=>visible(k) && texty(k));
+    if (items.length>=2) items.forEach(split);
+    else if (pointer(e) && !scripted.has(e)) { scripted.add(e); candidates.push(e); }
+  };
+  for (const root of [...scripted]) {
+    const box=root.getBoundingClientRect();
+    for (const d of root.querySelectorAll('*')) {
+      if (d.ownerSVGElement || d.matches(selector) || !pointer(d) || !visible(d)) continue;
+      const parent=d.parentElement;
+      if (inside(d.getBoundingClientRect(),box) ||
+          (parent!==root && !inside(parent.getBoundingClientRect(),box))) continue;
+      split(d);
+    }
+  }
   const actions=[];
   for (const e of candidates) {
     if (!safe(e) || !visible(e) || e.matches(':disabled') || e.closest('[aria-disabled="true"]')) continue;
