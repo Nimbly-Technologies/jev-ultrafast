@@ -18,6 +18,7 @@ HTML = """<!doctype html><title>Guard checks</title>
 <div style="position:absolute;top:24px;left:0;width:260px;background:#eee">
 <div onclick="window.item='Users'"><div><b>Users</b> Add and edit users</div></div>
 <div onclick="window.item='User Groups'"><div><b>User Groups</b> Manage groups</div></div></div></div></nav>
+<div id="react" style="cursor:auto">Advanced Configurations</div>
 <p id="outside">Unrelated offscreen text</p>"""
 
 
@@ -44,6 +45,12 @@ def main():
         browser.act(items[0], page)
         assert browser.evaluate("window.item") == "User Groups"
         passed.append("items of a scripted menu nested in its trigger are separate clickable elements")
+        browser.evaluate("document.querySelector('#react').onclick=()=>{window.expanded=1}")
+        page = browser.observe(screenshot=False)
+        header = next(a for a in page["actions"] if a["label"] == "Advanced Configurations")
+        browser.act(header, page)
+        assert browser.evaluate("window.expanded") == 1
+        passed.append("an element with an onclick handler but no pointer cursor is clickable")
         page = browser.observe(screenshot=False)
 
         browser.evaluate("document.querySelector('#outside').textContent='Updated outside the viewport'")

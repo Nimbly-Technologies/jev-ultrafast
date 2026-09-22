@@ -72,14 +72,16 @@
       e.getAttribute('href'),scope?.innerText?.slice(0,6000)||''];
   };
   // Many apps make a plain <div> clickable with a script handler and no role: a card, a tile, an avatar.
-  // The pointer cursor is the only trace it leaves. Take the outermost pointer element that is not
+  // A pointer cursor, or an onclick property, is the only trace it leaves. Take the outermost pointer element that is not
   // already inside a real control, so a card counts once, not once per nested span.
   const pointer=e=>getComputedStyle(e).cursor==='pointer';
   const scripted=new Set(), candidates=[];
   for (const e of document.querySelectorAll('body *')) {
     if (e.matches(selector)) { candidates.push(e); continue; }
-    if (e.ownerSVGElement || e.closest(selector) || !pointer(e) ||
-        (e.parentElement && pointer(e.parentElement))) continue;
+    if (e.ownerSVGElement || e.closest(selector)) continue;
+    // React marks every element with an onClick handler with a no-op onclick property, pointer cursor or not.
+    const handler=typeof e.onclick==='function';
+    if (!handler && (!pointer(e) || (e.parentElement && pointer(e.parentElement)))) continue;
     scripted.add(e); candidates.push(e);
   }
   // A scripted menu often nests its items inside the trigger (a hover dropdown under a nav tab), so they all
