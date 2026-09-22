@@ -66,6 +66,7 @@ class Browser:
         self.call("Emulation.setDeviceMetricsOverride", width=width, height=height, deviceScaleFactor=1, mobile=False)
         # Keep rAF/menus rendering in an owned background tab, without activating the user's Chrome tab.
         self.call("Emulation.setFocusEmulationEnabled", enabled=True)
+        self.call("Page.enable")
         self.call("Page.addScriptToEvaluateOnNewDocument", source=TRACK_REQUESTS)
         self.goto(url, timeout=15, required=False)
 
