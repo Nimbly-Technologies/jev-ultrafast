@@ -58,7 +58,8 @@ def action_space(actions):
         if node not in indices:
             index = str(len(elements) + 1)
             indices[node] = index
-            element = {k: action[k] for k in ("role", "value", "checked", "selected", "expanded") if k in action}
+            keys = ("role", "value", "checked", "selected", "expanded", "secret")
+            element = {k: action[k] for k in keys if k in action}
             element.update(index=index, label=action["label"].split(" → ")[0], operations=[])
             if kind == "select":
                 element["value"] = action.get("current_value", "")
@@ -82,7 +83,11 @@ def choose(state, goal, history):
     elements, targets, controls = action_space(state["actions"])
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
-        "TYPE_TEXT": "Enter or replace text in an editable field. A small LLM will supply the value from the goal.",
+        "TYPE_TEXT": (
+            "Enter or replace text in an editable field. A small LLM will supply the value from the goal. "
+            "An element marked secret is filled from local secure storage instead, so choose it even "
+            "though the goal never states its value."
+        ),
         "SELECT": "Select an observed dropdown value.",
     }
     operations = {key: labels[key] for key in targets}
@@ -98,7 +103,7 @@ def choose(state, goal, history):
                 index: {
                     "element": f"[{index}] {a['label']}",
                     "current_value": a.get("current_value", a.get("value", "")),
-                    **{k: a[k] for k in ("role", "checked", "selected", "expanded") if k in a},
+                    **{k: a[k] for k in ("role", "checked", "selected", "expanded", "secret") if k in a},
                 }
                 for index, a in candidates.items()
             },
