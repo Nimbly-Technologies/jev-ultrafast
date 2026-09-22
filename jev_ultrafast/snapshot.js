@@ -45,7 +45,22 @@
     }
     return null;
   };
-  cache.pageKey=()=>[performance.timeOrigin,location.href,scrollX,scrollY,innerWidth,innerHeight,
+  // Apps that pin their chrome often scroll a container instead of the window. Take the largest visible one
+  // that actually overflows, so a page scrolled that way is still scrollable and its scroll still counts.
+  cache.findScroller=()=>{
+    if (document.documentElement.scrollHeight>innerHeight+2) return null;
+    let best=null, area=0;
+    for (const e of document.querySelectorAll('body *')) {
+      if (e.scrollHeight<=e.clientHeight+2 || !['auto','scroll'].includes(getComputedStyle(e).overflowY)) continue;
+      const r=e.getBoundingClientRect(), a=Math.max(0,Math.min(r.bottom,innerHeight)-Math.max(r.top,0))*
+        Math.max(0,Math.min(r.right,innerWidth)-Math.max(r.left,0));
+      if (a>area && visible(e)) { best=e; area=a; }
+    }
+    return best;
+  };
+  cache.scroller=cache.findScroller();
+  cache.pageKey=()=>[performance.timeOrigin,location.href,scrollX,scrollY,cache.scroller?.scrollTop||0,
+    innerWidth,innerHeight,
     [...document.querySelectorAll('input,textarea,select')].filter(safe)
       .map(e=>[identity(e),shown(e),e.checked,e.selectedIndex,e.disabled,e.readOnly])];
   cache.guard=e=>{
@@ -110,35 +125,55 @@
       const editable=!e.readOnly && e.getAttribute('aria-readonly')!=='true' &&
         (['textbox','searchbox','spinbutton'].includes(rname) ||
           (rname==='combobox' && ['INPUT','TEXTAREA'].includes(e.tagName)));
-      const value=secret(e) ? shown(e) : 'value' in e ? String(e.value) :
+      let value=secret(e) ? shown(e) : 'value' in e ? String(e.value) :
         e.isContentEditable || rname==='combobox' ? e.innerText.trim() : '';
+      // A select-style combobox (react-select and kin) keeps its typed filter in the <input> and renders the
+      // chosen option beside it, so an empty input does not mean an empty field. Report what the control shows.
+      if (rname==='combobox' && e.tagName==='INPUT' && !value) {
+        for (let up=e.parentElement, i=0; up && i<4 && !value; up=up.parentElement, i++)
+          value=(up.innerText||'').trim().slice(0,200);
+      }
       actions.push({...base,kind:editable?'fill':'click',value});
       if (editable) actions.push({...base,kind:'click',value,label:'Open '+base.label});
     }
   }
-  const words=[], walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
-  const range=document.createRange(); let node,length=0;
-  while ((node=walker.nextNode()) && length<6000) {
-    const value=node.textContent.trim(), parent=node.parentElement;
-    if (!value || !parent || parent.closest('script,style,noscript,template') || !visible(parent)) continue;
-    range.selectNodeContents(node); const r=range.getBoundingClientRect();
-    if (r.width>0 && r.height>0 && r.bottom>0 && r.top<innerHeight && r.right>0 && r.left<innerWidth) {
-      words.push(value); length+=value.length;
+  // An open dialog is what the user is looking at, but it usually sits late in the DOM, behind a page whose
+  // text alone can fill the budget. Read open dialogs first, then the rest of the page.
+  const dialogs=[...document.querySelectorAll('dialog[open],[role="dialog"],[role="alertdialog"],[aria-modal="true"]')]
+    .filter(d=>visible(d) && !d.parentElement?.closest('dialog[open],[role="dialog"],[role="alertdialog"],[aria-modal="true"]'));
+  const words=[], range=document.createRange(); let length=0;
+  for (const root of [...dialogs, document.body]) {
+    const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT); let node;
+    while ((node=walker.nextNode()) && length<6000) {
+      const value=node.textContent.trim(), parent=node.parentElement;
+      if (!value || !parent || parent.closest('script,style,noscript,template') || !visible(parent)) continue;
+      if (root===document.body && dialogs.some(d=>d.contains(parent))) continue;
+      range.selectNodeContents(node); const r=range.getBoundingClientRect();
+      if (r.width>0 && r.height>0 && r.bottom>0 && r.top<innerHeight && r.right>0 && r.left<innerWidth) {
+        words.push(value); length+=value.length;
+      }
     }
   }
-  const text=words.join('\n').slice(0,6000), height=document.documentElement.scrollHeight;
+  const text=words.join('\n').slice(0,6000), scroller=cache.scroller;
+  const top=scroller ? scroller.scrollTop : scrollY;
+  const height=scroller ? scroller.scrollHeight : document.documentElement.scrollHeight;
+  const view=scroller ? scroller.clientHeight : innerHeight;
+  // A wheel event scrolls whatever scrolls under the pointer, so aim it at the scroller's visible middle.
+  const aim=scroller ? (r=>({x:Math.round((Math.max(0,r.left)+Math.min(r.right,innerWidth))/2),
+    y:Math.round((Math.max(0,r.top)+Math.min(r.bottom,innerHeight))/2)}))(scroller.getBoundingClientRect()) : {};
   const page_key=cache.pageKey(), guards={};
   for (const a of actions) if (!(a.node in guards)) guards[a.node]=cache.guard(cache.nodes.get(a.node));
   // Compare meaning and identity. Geometry is always resolved and hit-tested just before input.
   const semantics=actions.map(({rect,...action})=>action);
-  const marker=[performance.timeOrigin,location.href,scrollX,scrollY,innerWidth,innerHeight,
-    document.title,text,semantics,page_key[6]];
+  const marker=[performance.timeOrigin,location.href,scrollX,scrollY,top,innerWidth,innerHeight,
+    document.title,text,semantics,page_key[7]];
   const omitted_actions=Math.max(0,actions.length-250);
   actions.splice(250);
   actions.forEach((a,i)=>a.id='e'+(i+1));
-  if (scrollY+innerHeight<height-2) actions.push({id:'scroll_down',kind:'scroll',label:'Scroll down',delta:560});
-  if (scrollY>0) actions.push({id:'scroll_up',kind:'scroll',label:'Scroll up',delta:-560});
+  const step=Math.round(Math.min(560,view*0.7));
+  if (top+view<height-2) actions.push({id:'scroll_down',kind:'scroll',label:'Scroll down',delta:step,...aim});
+  if (top>0) actions.push({id:'scroll_up',kind:'scroll',label:'Scroll up',delta:-step,...aim});
   actions.push({id:'wait',kind:'wait',label:'Wait for the page to update'});
   return {url:location.href,title:document.title,w:innerWidth,h:innerHeight,text,
-    scroll:{y:scrollY,height},actions,marker,page_key,guards,omitted_actions};
+    scroll:{y:top,height},actions,marker,page_key,guards,omitted_actions};
 })()

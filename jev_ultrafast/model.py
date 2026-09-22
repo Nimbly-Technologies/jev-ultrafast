@@ -92,7 +92,9 @@ def read_answers(result, operations, targets):
     return operation_answer, validate_choice(answers.get(operation.lower() + "_target", {}), targets[operation])
 
 
-def choose(state, goal, history):
+def choose(state, goal, history, rules=NEXT_ACTION):
+    """One operation and its target. `rules` frames the goal: NEXT_ACTION for a multi-step goal, STEP for a
+    single explicit instruction."""
     elements, targets, controls = action_space(state["actions"])
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
@@ -107,7 +109,7 @@ def choose(state, goal, history):
     operations.update({key: value["label"] for key, value in controls.items()})
     operations.update(DONE="Every requirement is visibly satisfied.", BLOCKED="No supported operation can progress.")
     questions = {
-        "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": NEXT_ACTION}}
+        "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": rules}}
     }
     for operation, candidates in targets.items():
         questions[operation.lower() + "_target"] = {
@@ -120,7 +122,7 @@ def choose(state, goal, history):
                 }
                 for index, a in candidates.items()
             },
-            "instructions": {"goal": goal, "operation": operation, "rules": [NEXT_ACTION, TARGET]},
+            "instructions": {"goal": goal, "operation": operation, "rules": [rules, TARGET]},
         }
     body = {
         "model": os.environ.get("TYPESAFE_MODEL", "jev-latest"),

@@ -457,3 +457,21 @@ def test_policy_is_told_which_fields_are_secret(monkeypatch):
     assert seen["state"]["elements"][0]["secret"] is True
     assert seen["questions"]["type_text_target"]["criteria"]["1"]["secret"] is True
     assert "secret" in seen["questions"]["operation"]["criteria"]["TYPE_TEXT"]
+
+
+def test_act_frames_its_instruction_as_one_step_and_pursue_as_a_goal(monkeypatch):
+    from jev_ultrafast.questions import NEXT_ACTION, STEP
+
+    p = page()
+    browser = Mock(fresh=Mock(return_value=True), observe=Mock(return_value=p))
+    a = loop.Agent(browser=browser)
+    seen = []
+
+    def choose(_page, _goal, _history, rules):
+        seen.append(rules)
+        return {**decision("e3"), "operation": "CLICK"} if len(seen) == 1 else {**decision("DONE"), "operation": "DONE"}
+
+    monkeypatch.setattr(loop, "choose", choose)
+    a.act("Click Go")
+    a.pursue("Finish")
+    assert seen == [STEP, NEXT_ACTION]

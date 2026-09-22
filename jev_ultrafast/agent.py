@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .browser import Browser, StalePage
 from .model import action_space, choose, field_context, field_text
-from .questions import MAX_STEPS
+from .questions import MAX_STEPS, NEXT_ACTION, STEP
 from .secrets import MASK, secret_for
 
 # Operations that change nothing a user asked for: taking one never completes a single-action step.
@@ -66,6 +66,7 @@ class Agent:
             elapsed_ms=0,
             started_at=None,
             record=bool(self.record_dir),
+            rules=NEXT_ACTION,
         )
 
     def snapshot(self):
@@ -110,7 +111,7 @@ class Agent:
             timeout = budget.get("timeout")
             if timeout and time.perf_counter() - state["started_at"] > timeout:
                 self._stop(f"Reached the {timeout:g} s time budget")
-            state["decision"] = choose(state["page"], state["goal"], state["history"])
+            state["decision"] = choose(state["page"], state["goal"], state["history"], state.get("rules", NEXT_ACTION))
             state["decisions"].append(
                 {
                     **state["decision"],
@@ -237,6 +238,9 @@ class Agent:
         """
         self._begin(instruction, {"max_steps": max_model_calls, "max_model_calls": max_model_calls,
                                   "timeout": timeout})
+        # A caller-chosen step is framed as one: the multi-step rules (fill every required field before
+        # submitting, BLOCKED when the goal cannot progress) made the policy refuse a plainly visible target.
+        self.state["rules"] = STEP
         state = self.state
         try:
             while state["status"] not in {"done", "blocked"}:

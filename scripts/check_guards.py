@@ -152,6 +152,25 @@ def main():
         browser.wait_for_change(page)
         assert time.monotonic() - started >= 1.2 and "Loaded" in browser.observe(screenshot=False)["text"]
         passed.append("WAIT outlasts an in-flight request and returns once the page settles")
+        # The page scrolls inside a container, not the window; a select-style combobox shows its choice beside
+        # an empty input.
+        browser.evaluate("""document.body.innerHTML='<div id=\"pane\" style=\"height:600px;overflow-y:auto\">'+
+          '<div class=\"control\"><span>Daily Essentials</span><input role=\"combobox\" aria-label=\"Site\"></div>'+
+          '<div style=\"height:1500px\"></div><button onclick=\"window.deep=1\">Deep button</button></div>';
+          document.body.style.height='700px'; document.documentElement.style.overflow='hidden'""")
+        page = browser.observe(screenshot=False)
+        site = next(a for a in page["actions"] if a["label"] == "Site" and a["kind"] == "fill")
+        assert site["value"] == "Daily Essentials", site
+        passed.append("a select-style combobox reports the choice it displays")
+        assert not any(a["label"] == "Deep button" for a in page["actions"])
+        for _ in range(4):
+            down = next((a for a in page["actions"] if a["id"] == "scroll_down"), None)
+            if not down:
+                break
+            browser.act(down, page)
+            page = browser.observe(screenshot=False)
+        assert any(a["label"] == "Deep button" for a in page["actions"]), [a["label"] for a in page["actions"]]
+        passed.append("a page that scrolls inside a container can be scrolled to reach what is below")
         browser.call("Page.navigate", url="about:blank")
         assert not browser.fresh(page, field)
         passed.append("navigation invalidates the old document")
