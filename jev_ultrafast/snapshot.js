@@ -104,16 +104,34 @@
       split(d);
     }
   }
+  // A control outside the viewport is reachable when scrolling can bring it there: it lies inside the document
+  // (not parked at -9999px) and no ancestor clips it away (a collapsed or hidden overflow panel).
+  const reachable=(e,x,y)=>{
+    if (x+scrollX<0 || y+scrollY<0) return false;
+    for (let a=e.parentElement; a && a!==document.body && a!==document.documentElement; a=a.parentElement) {
+      const o=getComputedStyle(a);
+      if (o.overflowX==='visible' && o.overflowY==='visible') continue;
+      if (['auto','scroll'].includes(o.overflowY) || ['auto','scroll'].includes(o.overflowX)) continue;
+      const q=a.getBoundingClientRect();
+      if (x<q.left || x>q.right || y<q.top || y>q.bottom) return false;
+    }
+    return true;
+  };
   const actions=[];
   for (const e of candidates) {
     if (!safe(e) || !visible(e) || e.matches(':disabled') || e.closest('[aria-disabled="true"]')) continue;
     const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2,
       rname=role(e) || (scripted.has(e) ? 'button' : null);
-    if (!rname || r.width<=0 || r.height<=0 || x<0 || y<0 || x>=innerWidth || y>=innerHeight) continue;
+    if (!rname || r.width<=0 || r.height<=0) continue;
+    const inView=x>=0 && y>=0 && x<innerWidth && y<innerHeight;
+    if (!inView && !reachable(e,x,y)) continue;
     if (rname==='gridcell' && e.querySelector('button,[role="button"]')) continue;
     const base={node:identity(e),role:rname,label:(scripted.has(e) ? name(e).slice(0,200) : name(e))||rname,
       rect:{x:r.x,y:r.y,w:r.width,h:r.height}};
     if (secret(e)) base.secret=true;
+    // Outside the viewport but reachable by scrolling: offered, and scrolled into view before input.
+    if (!inView) { base.offscreen=true; base.distance=Math.round(y<0 ? -y : y>=innerHeight ? y-innerHeight :
+      x<0 ? -x : x-innerWidth); }
     for (const key of ['checked','selected','expanded']) {
       const value=e.getAttribute('aria-'+key);
       if (value!==null) base[key]=value;
@@ -170,6 +188,12 @@
   const marker=[performance.timeOrigin,location.href,scrollX,scrollY,top,innerWidth,innerHeight,
     document.title,text,semantics,page_key[7]];
   const omitted_actions=Math.max(0,actions.length-250);
+  // What is on screen comes first; then at most 80 off-screen controls, nearest first, so a long table cannot
+  // crowd out the page the user is looking at.
+  const onscreen=actions.filter(a=>!a.offscreen);
+  const offscreen=actions.filter(a=>a.offscreen).sort((a,b)=>a.distance-b.distance).slice(0,80);
+  actions.length=0; actions.push(...onscreen, ...offscreen);
+  for (const a of actions) delete a.distance;
   actions.splice(250);
   actions.forEach((a,i)=>a.id='e'+(i+1));
   const step=Math.round(Math.min(560,view*0.7));

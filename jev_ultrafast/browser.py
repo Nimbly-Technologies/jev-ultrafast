@@ -302,6 +302,11 @@ def browser_operation(request):
                   if (q.width>=20 && q.height>=16) { hit=a; r=q; break; }
                 }
               }
+              // Off screen, or cut by an edge: scroll it to the middle first, as a user would, then measure again.
+              if (r.width && r.height && (r.top<0 || r.left<0 || r.bottom>innerHeight || r.right>innerWidth)) {
+                hit.scrollIntoView({block:'center',inline:'center',behavior:'instant'});
+                r=hit.getBoundingClientRect();
+              }
               const x=r.x+r.width/2, y=r.y+r.height/2;
               if (!r.width || !r.height || x<0 || y<0 || x>=innerWidth || y>=innerHeight) return null;
               if (!hit.contains(document.elementFromPoint(x,y))) return null;

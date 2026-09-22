@@ -58,7 +58,7 @@ def action_space(actions):
         if node not in indices:
             index = str(len(elements) + 1)
             indices[node] = index
-            keys = ("role", "value", "checked", "selected", "expanded", "secret")
+            keys = ("role", "value", "checked", "selected", "expanded", "secret", "offscreen")
             element = {k: action[k] for k in keys if k in action}
             element.update(index=index, label=action["label"].split(" → ")[0], operations=[])
             if kind == "select":
@@ -118,7 +118,7 @@ def choose(state, goal, history, rules=NEXT_ACTION):
                 index: {
                     "element": f"[{index}] {a['label']}",
                     "current_value": a.get("current_value", a.get("value", "")),
-                    **{k: a[k] for k in ("role", "checked", "selected", "expanded", "secret") if k in a},
+                    **{k: a[k] for k in ("role", "checked", "selected", "expanded", "secret", "offscreen") if k in a},
                 }
                 for index, a in candidates.items()
             },

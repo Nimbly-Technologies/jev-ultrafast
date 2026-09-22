@@ -180,15 +180,11 @@ def main():
         site = next(a for a in page["actions"] if a["label"] == "Site" and a["kind"] == "fill")
         assert site["value"] == "Daily Essentials", site
         passed.append("a select-style combobox reports the choice it displays")
-        assert not any(a["label"] == "Deep button" for a in page["actions"])
-        for _ in range(4):
-            down = next((a for a in page["actions"] if a["id"] == "scroll_down"), None)
-            if not down:
-                break
-            browser.act(down, page)
-            page = browser.observe(screenshot=False)
-        assert any(a["label"] == "Deep button" for a in page["actions"]), [a["label"] for a in page["actions"]]
-        passed.append("a page that scrolls inside a container can be scrolled to reach what is below")
+        deep = next(a for a in page["actions"] if a["label"] == "Deep button")
+        assert deep.get("offscreen") is True and any(a["id"] == "scroll_down" for a in page["actions"])
+        browser.act(deep, page)
+        assert browser.evaluate("window.deep") == 1
+        passed.append("a control below the fold of a scrolling container is offered and scrolled into view")
         browser.call("Page.navigate", url="about:blank")
         assert not browser.fresh(page, field)
         passed.append("navigation invalidates the old document")
