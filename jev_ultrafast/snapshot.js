@@ -107,15 +107,16 @@
   // A control outside the viewport is reachable when scrolling can bring it there: it lies inside the document
   // (not parked at -9999px) and no ancestor clips it away (a collapsed or hidden overflow panel).
   const reachable=(e,x,y)=>{
-    if (x+scrollX<0 || y+scrollY<0) return false;
+    let scrolls=false;
     for (let a=e.parentElement; a && a!==document.body && a!==document.documentElement; a=a.parentElement) {
       const o=getComputedStyle(a);
       if (o.overflowX==='visible' && o.overflowY==='visible') continue;
-      if (['auto','scroll'].includes(o.overflowY) || ['auto','scroll'].includes(o.overflowX)) continue;
+      if (['auto','scroll'].includes(o.overflowY) || ['auto','scroll'].includes(o.overflowX)) { scrolls=true; continue; }
       const q=a.getBoundingClientRect();
       if (x<q.left || x>q.right || y<q.top || y>q.bottom) return false;
     }
-    return true;
+    // Without a scrolling ancestor only the window scrolls, which cannot reach above or left of the document.
+    return scrolls || (x+scrollX>=0 && y+scrollY>=0);
   };
   const actions=[];
   for (const e of candidates) {

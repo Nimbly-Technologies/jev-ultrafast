@@ -184,6 +184,9 @@ def main():
         assert deep.get("offscreen") is True and any(a["id"] == "scroll_down" for a in page["actions"])
         browser.act(deep, page)
         assert browser.evaluate("window.deep") == 1
+        page = browser.observe(screenshot=False)
+        site = next(a for a in page["actions"] if a["label"] == "Open Site")
+        assert site.get("offscreen") is True, site  # Above the fold of the scrolled container.
         passed.append("a control below the fold of a scrolling container is offered and scrolled into view")
         browser.call("Page.navigate", url="about:blank")
         assert not browser.fresh(page, field)
