@@ -56,13 +56,25 @@
       e.getAttribute('aria-expanded'),e.getAttribute('aria-checked'),e.getAttribute('aria-selected'),
       e.getAttribute('href'),scope?.innerText?.slice(0,6000)||''];
   };
+  // Many apps make a plain <div> clickable with a script handler and no role: a card, a tile, an avatar.
+  // The pointer cursor is the only trace it leaves. Take the outermost pointer element that is not
+  // already inside a real control, so a card counts once, not once per nested span.
+  const pointer=e=>getComputedStyle(e).cursor==='pointer';
+  const scripted=new Set(), candidates=[];
+  for (const e of document.querySelectorAll('body *')) {
+    if (e.matches(selector)) { candidates.push(e); continue; }
+    if (e.ownerSVGElement || e.closest(selector) || !pointer(e) ||
+        (e.parentElement && pointer(e.parentElement))) continue;
+    scripted.add(e); candidates.push(e);
+  }
   const actions=[];
-  for (const e of document.querySelectorAll(selector)) {
+  for (const e of candidates) {
     if (!safe(e) || !visible(e) || e.matches(':disabled') || e.closest('[aria-disabled="true"]')) continue;
-    const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2, rname=role(e);
+    const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2,
+      rname=role(e) || (scripted.has(e) ? 'button' : null);
     if (!rname || r.width<=0 || r.height<=0 || x<0 || y<0 || x>=innerWidth || y>=innerHeight) continue;
     if (rname==='gridcell' && e.querySelector('button,[role="button"]')) continue;
-    const base={node:identity(e),role:rname,label:name(e)||rname,
+    const base={node:identity(e),role:rname,label:(scripted.has(e) ? name(e).slice(0,200) : name(e))||rname,
       rect:{x:r.x,y:r.y,w:r.width,h:r.height}};
     if (secret(e)) base.secret=true;
     for (const key of ['checked','selected','expanded']) {
