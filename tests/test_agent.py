@@ -436,6 +436,8 @@ def test_the_inspector_loads_a_quoted_json_secret_as_json(tmp_path, monkeypatch)
     ("mercury # cheap", "mercury"),
     ("p#ss", "p#ss"),
     ("", ""),
+    ("'{\"Password\": \"it's a secret\"}'", '{"Password": "it\'s a secret"}'),
+    ("'plain' # don't", "plain"),
 ])
 def test_inspector_env_values_follow_dotenv(raw, value):
     from jev_ultrafast.demo import env_value
@@ -452,3 +454,12 @@ def test_inspector_ignores_a_line_without_a_key(tmp_path, monkeypatch):
     demo.load_environment()
     assert os.environ["JEV_DEMO_CHECK"] == "1"
     monkeypatch.delenv("JEV_DEMO_CHECK")
+
+
+def test_inspector_rejects_an_unclosed_quote(tmp_path, monkeypatch):
+    from jev_ultrafast import demo
+
+    (tmp_path / ".env").write_text("TEXT_MODEL='gpt-4o\n")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="TEXT_MODEL: Unclosed ' quote"):
+        demo.load_environment()
