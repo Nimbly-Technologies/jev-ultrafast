@@ -438,6 +438,10 @@ def test_the_inspector_loads_a_quoted_json_secret_as_json(tmp_path, monkeypatch)
     ("", ""),
     ("'{\"Password\": \"it's a secret\"}'", '{"Password": "it\'s a secret"}'),
     ("'plain' # don't", "plain"),
+    ('"{\\"Password\\": \\"hunter2\\"}"', '{"Password": "hunter2"}'),
+    ('"back\\\\slash"', "back\\slash"),
+    ('"ends in a backslash\\\\"', "ends in a backslash\\"),
+    ("'{\\\"x\\\"}'", '{\\"x\\"}'),
 ])
 def test_inspector_env_values_follow_dotenv(raw, value):
     from jev_ultrafast.demo import env_value
