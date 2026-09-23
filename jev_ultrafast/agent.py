@@ -193,6 +193,7 @@ def no_value_reason(action, secret, missing):
     """Why a field could not be filled. A password field with no stored entry is almost always a JEV_SECRETS key
     that does not match its label, so say that rather than blaming the text helper."""
     if secret:
-        return (f"No secret stored for the password field {action['label']!r} (JEV_SECRETS keys match the label "
-                "exactly) and the goal gives no value for it; nothing typed.")
+        return (f"No secret stored for the password field {action['label']!r} and the goal gives no value for it; "
+                "nothing typed. A JEV_SECRETS key matches a label ignoring case, surrounding whitespace and a "
+                "trailing * or colon.")
     return str(missing)

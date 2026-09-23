@@ -95,8 +95,8 @@ Password fields are observable, but their values never leave the page: every ser
 Keep the password out of the goal and in `.env`, as a JSON object mapping the field's label to its value:
 
 ```bash
-# .env
-JEV_SECRETS={"Password": "..."}
+# .env (single quotes keep a # or a space inside the secret intact)
+JEV_SECRETS='{"Password": "..."}'
 ```
 
 ```bash
