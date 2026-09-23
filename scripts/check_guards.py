@@ -1,7 +1,10 @@
 """Local-browser freshness/execution regressions. No model calls or external websites."""
 
+import threading
 import time
 from urllib.parse import quote
+
+from browser_harness.helpers import drain_events
 
 from jev_ultrafast.browser import Browser, StalePage, wait_limits
 
@@ -125,18 +128,38 @@ def main():
         assert value == "Generated", repr(value)
         assert any(a.get("role") == "option" for a in page["actions"])
         passed.append("real text input waits for asynchronous combobox suggestions")
-        # A request in flight for longer than the quiet timeout: WAIT must outlast it, then see the change.
+        # A real request, held by the browser for 1.2 s (no server needed): WAIT must outlast it, then see the
+        # change that follows it. Fetch interception pauses the request inside Chrome's network stack.
+        browser.call("Fetch.enable", patterns=[{"urlPattern": "*jev-guard.invalid*", "requestStage": "Request"}])
+        drain_events()
         page = browser.observe(screenshot=False)
-        browser.evaluate("window.__jevInflight=1; setTimeout(()=>{const p=document.createElement('p'); "
-                         "p.textContent='Loaded'; document.body.prepend(p); window.__jevInflight=0},1200)")
+        # The page changes at once ("Loading...") while the request is still in flight, as real pages do: only the
+        # in-flight counter keeps WAIT from returning on that first change.
+        browser.evaluate("const p=document.createElement('p'); p.textContent='Loading...'; document.body.prepend(p);"
+                         "fetch('https://jev-guard.invalid/slow', {mode: 'no-cors'})"
+                         ".finally(() => { p.textContent='Loaded' })")
+
+        def release():
+            request, deadline = None, time.monotonic() + 5
+            while request is None and time.monotonic() < deadline:
+                request = next((e["params"]["requestId"] for e in drain_events()
+                                if e["method"] == "Fetch.requestPaused"), None)
+                time.sleep(0.02)
+            time.sleep(1.2)
+            browser.call("Fetch.fulfillRequest", requestId=request, responseCode=200, body="b2s=")
+
+        releaser = threading.Thread(target=release)
+        releaser.start()
         started = time.monotonic()
         browser.wait_for_change(page)
         elapsed = time.monotonic() - started
+        releaser.join()
+        browser.call("Fetch.disable")
         quiet_timeout, _ = wait_limits()
         # The upper bound matters: with a dead counter WAIT would still return, but only at the quiet timeout.
         assert 1.2 <= elapsed < min(quiet_timeout, 3), elapsed
         assert "Loaded" in browser.observe(screenshot=False)["text"]
-        passed.append("WAIT outlasts an in-flight request and returns as soon as the page settles")
+        passed.append("WAIT outlasts a real in-flight request and returns as soon as the page settles")
         browser.evaluate("try { new XMLHttpRequest().send() } catch (_) {}")
         assert browser.evaluate("window.__jevInflight") == 0
         passed.append("a request that throws before dispatch does not leave WAIT believing the page is busy")

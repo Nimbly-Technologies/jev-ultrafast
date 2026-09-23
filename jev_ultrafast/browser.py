@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import os
 import sys
 import time
@@ -21,12 +22,26 @@ NAVIGATION_GRACE_MS = 15000
 
 def wait_limits():
     """(quiet timeout, hard cap), read when a WAIT runs so a .env loaded after import still applies: how long a
-    WAIT gives a quiet page to change, and how long it may wait while requests are in flight."""
-    return float(os.environ.get("JEV_WAIT_TIMEOUT", "3")), float(os.environ.get("JEV_WAIT_MAX", "15"))
+    WAIT gives a quiet page to change, and how long it may wait while the page is busy."""
+    return _seconds("JEV_WAIT_TIMEOUT", 3), _seconds("JEV_WAIT_MAX", 15)
+
+
+def _seconds(name, default):
+    raw = os.environ.get(name, "").strip()
+    try:
+        value = float(raw) if raw else float(default)
+    except ValueError:
+        value = float("nan")
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a positive number of seconds, not {raw!r}")
+    return value
 
 
 # Counts the page's own fetch/XHR requests in flight, and marks a navigation that has started (a form submit,
 # a redirect) until the next document replaces this one, so WAIT can tell "loading" from "stuck".
+# A fetch counts until its promise settles, which is when the response headers arrive; a large body may still be
+# streaming. Counting body reads instead would leave the counter stuck whenever a page never reads a body, so this
+# accepts the earlier signal: WAIT still needs the page itself to change and stay quiet for SETTLE_S.
 TRACK_REQUESTS = """(() => {
   if (window.__jevInflight !== undefined) return;
   window.__jevInflight = 0;
