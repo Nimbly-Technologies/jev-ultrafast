@@ -36,6 +36,19 @@ def _seconds(name, default):
     return value
 
 
+# Whether this document or any frame it can read has requests in flight or a navigation under way.
+BUSY = f"""(() => {{
+  const busy = w => (w.__jevInflight || 0) > 0 ||
+    (!!w.__jevNavigating && Date.now() - w.__jevNavigating < {NAVIGATION_GRACE_MS});
+  const frames = [window];
+  for (let i = 0; i < frames.length; i++)
+    for (let j = 0; j < frames[i].frames.length; j++) {{
+      try {{ void frames[i].frames[j].document; frames.push(frames[i].frames[j]); }} catch (_) {{}}
+    }}
+  return frames.some(w => {{ try {{ return busy(w); }} catch (_) {{ return false; }} }});
+}})()"""
+
+
 # Counts the page's own fetch/XHR requests in flight, and marks a navigation that has started (a form submit,
 # a redirect) until the next document replaces this one, so WAIT can tell "loading" from "stuck".
 # A fetch counts until its promise settles, which is when the response headers arrive; a large body may still be
@@ -238,12 +251,10 @@ class Browser:
         return result
 
     def busy(self):
-        """Requests in flight, a navigation under way, or a document mid-replacement (evaluation fails)."""
+        """Requests in flight or a navigation under way, in this document or any same-origin frame, or a document
+        mid-replacement (evaluation fails). Cross-origin frames cannot be read from here and are not counted."""
         try:
-            return bool(self.evaluate(
-                "(window.__jevInflight || 0) > 0 || "
-                f"(!!window.__jevNavigating && Date.now() - window.__jevNavigating < {NAVIGATION_GRACE_MS})"
-            ))
+            return bool(self.evaluate(BUSY))
         except (StalePage, RuntimeError):
             return True
 
@@ -251,12 +262,15 @@ class Browser:
         """Wait for the page to change and then settle, not a fixed tick: a slow login or a loading spinner
         otherwise burns one model call per tick and looks like a stuck page, and the policy wanders off.
 
-        Returns once the page has changed and the network has been quiet for SETTLE_S; or, if nothing
-        changes, after JEV_WAIT_TIMEOUT of quiet. While busy it keeps waiting, up to JEV_WAIT_MAX.
+        Returns once the page has changed and has neither changed again nor been busy for SETTLE_S; or, if nothing
+        changes, after JEV_WAIT_TIMEOUT of quiet. While busy it keeps waiting, up to JEV_WAIT_MAX. The cheap busy
+        check runs every 50 ms; the full-page comparison only every 250 ms.
         """
         timeout, cap = wait_limits()
         started = time.monotonic()
-        quiet_since = started
+        quiet_since = settled_since = started
+        seen = page["marker"]
+        changed, next_look = False, started
         while time.monotonic() - started < cap:
             time.sleep(0.05)
             now = time.monotonic()
@@ -264,12 +278,18 @@ class Browser:
                 quiet_since = None
                 continue
             quiet_since = quiet_since or now
-            quiet = now - quiet_since
-            try:
-                changed = not self.fresh(page)
-            except (StalePage, RuntimeError):
-                changed = True
-            if (changed and quiet >= SETTLE_S) or quiet >= timeout:
+            if now >= next_look:
+                next_look = now + 0.25
+                try:
+                    marker = self.evaluate(MARKER)
+                except (StalePage, RuntimeError):
+                    marker = None
+                if marker != seen:
+                    # Every further change restarts the settle interval, so a late change is not returned mid-way.
+                    seen, settled_since, changed = marker, now, True
+            if changed and now - max(quiet_since, settled_since) >= SETTLE_S:
+                return
+            if not changed and now - quiet_since >= timeout:
                 return
 
     def close(self):

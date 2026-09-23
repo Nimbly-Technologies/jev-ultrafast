@@ -21,11 +21,16 @@ AGENT = None
 
 
 def load_environment():
+    """Read ./.env as uv's --env-file does for these values: KEY=value lines, a value in matching single or double
+    quotes loses them (JEV_SECRETS='{"Password": "..."}' is JSON once loaded), and # lines are comments."""
     path = Path.cwd() / ".env"
     if path.exists():
         for line in path.read_text().splitlines():
+            line = line.strip()
             if "=" in line and not line.startswith("#"):
-                key, value = line.split("=", 1)
+                key, value = (part.strip() for part in line.split("=", 1))
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                    value = value[1:-1]
                 os.environ.setdefault(key, value)
 
 

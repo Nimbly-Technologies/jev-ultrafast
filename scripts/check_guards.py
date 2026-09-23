@@ -206,6 +206,23 @@ def main():
         browser.evaluate("try { new XMLHttpRequest().send() } catch (_) {}")
         assert browser.evaluate("window.__jevInflight") == 0
         passed.append("a request that throws before dispatch does not leave WAIT believing the page is busy")
+        # A page quiet for a second that then changes: the change itself must settle before WAIT returns (quiet
+        # time measured from the start of the WAIT would let it return on the very first read of the change).
+        page = browser.observe(screenshot=False)
+        browser.evaluate("setTimeout(() => { document.body.prepend('Late change') }, 1000)")
+        started = time.monotonic()
+        browser.wait_for_change(page)
+        elapsed = time.monotonic() - started
+        assert elapsed >= 1.0 + 0.3 and "Late change" in browser.observe(screenshot=False)["text"], elapsed
+        passed.append("a late change still settles before WAIT returns")
+        browser.evaluate("const f=document.createElement('iframe'); f.id='jevframe'; f.srcdoc='<p>frame</p>';"
+                         "document.body.append(f)")
+        time.sleep(0.5)
+        browser.evaluate("document.getElementById('jevframe').contentWindow.__jevInflight=1")
+        assert browser.busy()
+        browser.evaluate("document.getElementById('jevframe').contentWindow.__jevInflight=0")
+        assert not browser.busy()
+        passed.append("requests in a same-origin frame count as busy")
         browser.evaluate("dispatchEvent(new Event('beforeunload'))")
         assert browser.busy()
         passed.append("a navigation under way counts as busy")
