@@ -33,15 +33,22 @@ def load_environment():
                 continue
             key, raw = line.split("=", 1)
             if key.strip():
-                os.environ.setdefault(key.strip(), env_value(raw))
+                try:
+                    os.environ.setdefault(key.strip(), env_value(raw))
+                except ValueError as problem:
+                    raise ValueError(f"{path}: {key.strip()}: {problem}") from None
 
 
 def env_value(raw):
+    """A quoted value runs to its closing quote: the last matching quote followed only by whitespace or a comment,
+    so an apostrophe inside it ("it's") is kept. An unquoted value ends before a " #" comment."""
     raw = raw.strip()
     if raw[:1] in ("'", '"'):
-        end = raw.find(raw[0], 1)
-        if end != -1:
-            return raw[1:end]
+        closings = [i for i in range(1, len(raw)) if raw[i] == raw[0]
+                    and (not raw[i + 1:].strip() or raw[i + 1:].lstrip().startswith("#"))]
+        if not closings:
+            raise ValueError(f"Unclosed {raw[0]} quote in a .env value")
+        return raw[1:closings[-1]]
     comment = re.search(r"\s#", raw)
     return raw[:comment.start()].rstrip() if comment else raw
 
