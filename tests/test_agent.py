@@ -577,3 +577,20 @@ def test_a_missing_text_model_key_is_not_mistaken_for_a_missing_value(runner, mo
     runner.state["decision"] = decision("e1")
     with pytest.raises(ValueError, match="TEXT_MODEL_API_KEY"):
         runner.command("act", {"fingerprint": p["fingerprint"]})
+
+
+@pytest.mark.parametrize("raw", ["0", "-1", "nan", "inf", "soon"])
+def test_wait_limits_reject_values_that_would_break_every_wait(monkeypatch, raw):
+    from jev_ultrafast.browser import wait_limits
+
+    monkeypatch.setenv("JEV_WAIT_TIMEOUT", raw)
+    with pytest.raises(ValueError, match="JEV_WAIT_TIMEOUT must be a positive number"):
+        wait_limits()
+
+
+def test_wait_limits_default_and_read_at_call_time(monkeypatch):
+    from jev_ultrafast.browser import wait_limits
+
+    monkeypatch.delenv("JEV_WAIT_TIMEOUT", raising=False)
+    monkeypatch.setenv("JEV_WAIT_MAX", "20")
+    assert wait_limits() == (3.0, 20.0)
