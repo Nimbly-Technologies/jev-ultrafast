@@ -21,9 +21,10 @@ class NoFieldValue(ValueError):
     """The text helper found no value for the field in the goal. Nothing was typed."""
 
 
-def post_json(url, key, body):
-    for attempt in range(ATTEMPTS):
-        last = attempt == ATTEMPTS - 1
+def post_json(url, key, body, *, timeout=None, retries=None):
+    attempts = ATTEMPTS if retries is None else retries + 1
+    for attempt in range(attempts):
+        last = attempt == attempts - 1
         try:
             response = CLIENT.post(url, json=body, headers={"Authorization": f"Bearer {key}"})
         except httpx.HTTPError:
@@ -105,7 +106,7 @@ def read_answers(result, operations, targets):
     return operation_answer, validate_choice(answers.get(operation.lower() + "_target", {}), targets[operation])
 
 
-def choose(state, goal, history, rules=NEXT_ACTION):
+def choose(state, goal, history, rules=NEXT_ACTION, *, request_timeout=None, retries=None):
     """One operation and its target. `rules` frames the goal: NEXT_ACTION for a multi-step goal, STEP for a
     single explicit instruction."""
     elements, targets, controls = action_space(state["actions"])
@@ -150,15 +151,26 @@ def choose(state, goal, history, rules=NEXT_ACTION):
     }
     started = time.perf_counter()
     spent = []
-    for attempt in range(2):
-        result = post_json("https://api.typesafe.ai/v1/systemone", os.environ["TYPESAFE_API_KEY"], body)
+    validation_attempts = 2 if retries is None else retries + 1
+    request_options = {}
+    if request_timeout is not None:
+        request_options["timeout"] = request_timeout
+    if retries is not None:
+        request_options["retries"] = retries
+    for attempt in range(validation_attempts):
+        result = post_json(
+            "https://api.typesafe.ai/v1/systemone",
+            os.environ["TYPESAFE_API_KEY"],
+            body,
+            **request_options,
+        )
         spent.append(result.get("usage", {}) if isinstance(result, dict) else {})
         try:
             operation_answer, target_answer = read_answers(result, operations, targets)
             break
         except ValueError:
             # One retry: nothing has executed, so asking again cannot repeat a browser mutation.
-            if attempt:
+            if attempt == validation_attempts - 1:
                 raise
     operation = operation_answer["choice"]
     target = None

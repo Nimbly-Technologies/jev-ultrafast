@@ -9,6 +9,7 @@ dependencies = ["httpx[http2]>=0.28,<1", "websockets>=15,<17"]
 
 [project.scripts]
 jev = "jev_ultrafast.demo:main"
+jev-mobile-adapter = "jev_ultrafast.mobile_adapter:main"
 
 [build-system]
 requires = ["hatchling"]
