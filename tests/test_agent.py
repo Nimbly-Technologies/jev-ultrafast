@@ -608,3 +608,27 @@ def test_the_inspector_loads_a_quoted_json_secret_as_json(tmp_path, monkeypatch)
     demo.load_environment()
     assert secret_for("Password") == "p#ss word"
     assert os.environ["TEXT_MODEL"] == "m"
+
+
+@pytest.mark.parametrize(("raw", "value"), [
+    ("'{\"Password\": \"p#ss\"}'  # stored for the demo", '{"Password": "p#ss"}'),
+    ('"mercury"   # cheap', "mercury"),
+    ("mercury # cheap", "mercury"),
+    ("p#ss", "p#ss"),
+    ("", ""),
+])
+def test_inspector_env_values_follow_dotenv(raw, value):
+    from jev_ultrafast.demo import env_value
+
+    assert env_value(raw) == value
+
+
+def test_inspector_ignores_a_line_without_a_key(tmp_path, monkeypatch):
+    from jev_ultrafast import demo
+
+    (tmp_path / ".env").write_text("= orphan\n = also\nJEV_DEMO_CHECK=1\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("JEV_DEMO_CHECK", raising=False)
+    demo.load_environment()
+    assert os.environ["JEV_DEMO_CHECK"] == "1"
+    monkeypatch.delenv("JEV_DEMO_CHECK")

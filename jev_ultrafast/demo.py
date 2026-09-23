@@ -3,6 +3,7 @@
 import atexit
 import json
 import os
+import re
 import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,17 +22,28 @@ AGENT = None
 
 
 def load_environment():
-    """Read ./.env as uv's --env-file does for these values: KEY=value lines, a value in matching single or double
-    quotes loses them (JEV_SECRETS='{"Password": "..."}' is JSON once loaded), and # lines are comments."""
+    """Read ./.env the way uv's --env-file does for these values: KEY=value lines, # comment lines, a value in
+    matching quotes ends at its closing quote (JEV_SECRETS='{"Password": "..."}' is JSON once loaded), and an
+    unquoted value ends before a " #" comment. Lines without a key are ignored."""
     path = Path.cwd() / ".env"
     if path.exists():
         for line in path.read_text().splitlines():
             line = line.strip()
-            if "=" in line and not line.startswith("#"):
-                key, value = (part.strip() for part in line.split("=", 1))
-                if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-                    value = value[1:-1]
-                os.environ.setdefault(key, value)
+            if "=" not in line or line.startswith("#"):
+                continue
+            key, raw = line.split("=", 1)
+            if key.strip():
+                os.environ.setdefault(key.strip(), env_value(raw))
+
+
+def env_value(raw):
+    raw = raw.strip()
+    if raw[:1] in ("'", '"'):
+        end = raw.find(raw[0], 1)
+        if end != -1:
+            return raw[1:end]
+    comment = re.search(r"\s#", raw)
+    return raw[:comment.start()].rstrip() if comment else raw
 
 
 def response_state():
