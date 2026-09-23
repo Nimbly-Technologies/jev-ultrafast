@@ -12,13 +12,22 @@ from .questions import NEXT_ACTION, TARGET, TEXT_VALUE
 CLIENT = httpx.Client(http2=True, timeout=25)
 
 
+# Worth asking again: nothing has executed while a model call is in flight, so a retry cannot repeat an action.
+RETRY_STATUSES = {408, 429} | set(range(500, 600))
+ATTEMPTS = 4
+
+
 def post_json(url, key, body):
-    for attempt in range(3):
+    for attempt in range(ATTEMPTS):
+        last = attempt == ATTEMPTS - 1
         try:
             response = CLIENT.post(url, json=body, headers={"Authorization": f"Bearer {key}"})
         except httpx.HTTPError:
-            raise RuntimeError("Model connection failed; no action executed.") from None
-        if response.status_code in {429, 529, 503} and attempt < 2:
+            if last:
+                raise RuntimeError("Model connection failed; no action executed.") from None
+            time.sleep(0.5 * 2**attempt)
+            continue
+        if response.status_code in RETRY_STATUSES and not last:
             time.sleep(0.5 * 2**attempt)
             continue
         if response.is_error:

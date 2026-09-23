@@ -496,3 +496,32 @@ def test_quoted_value_overrides_the_vault_only_for_a_single_step(runner, monkeyp
     runner.command("act", {"fingerprint": p["fingerprint"]})
     typed = runner.state["browser"].act.call_args.kwargs["text"]
     assert (typed == "hunter2") is vault and helper.called is not vault
+
+
+@pytest.mark.parametrize("failure", [520, 502, 408, "network"])
+def test_transient_model_failures_are_asked_again(monkeypatch, failure):
+    import httpx
+
+    calls = []
+
+    def post(*_args, **_kwargs):
+        calls.append(1)
+        if len(calls) < 3:
+            if failure == "network":
+                raise httpx.ConnectError("reset")
+            return httpx.Response(failure, request=httpx.Request("POST", "https://x"))
+        return httpx.Response(200, json={"ok": True}, request=httpx.Request("POST", "https://x"))
+
+    monkeypatch.setattr(model.CLIENT, "post", post)
+    monkeypatch.setattr(model.time, "sleep", lambda _s: None)
+    assert model.post_json("https://x", "k", {}) == {"ok": True} and len(calls) == 3
+
+
+def test_a_client_error_is_not_retried(monkeypatch):
+    import httpx
+
+    post = Mock(return_value=httpx.Response(400, request=httpx.Request("POST", "https://x")))
+    monkeypatch.setattr(model.CLIENT, "post", post)
+    with pytest.raises(RuntimeError, match="HTTP 400"):
+        model.post_json("https://x", "k", {})
+    assert post.call_count == 1
