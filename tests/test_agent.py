@@ -1,6 +1,7 @@
 """Offline contracts for a dynamic operation/target policy. No paid APIs."""
 
 import json
+import os
 import time
 from copy import deepcopy
 from unittest.mock import Mock
@@ -414,3 +415,16 @@ def test_a_missing_text_model_key_is_not_mistaken_for_a_missing_value(runner, mo
     runner.state["decision"] = decision("e1")
     with pytest.raises(ValueError, match="TEXT_MODEL_API_KEY"):
         runner.command("act", {"fingerprint": p["fingerprint"]})
+
+
+def test_the_inspector_loads_a_quoted_json_secret_as_json(tmp_path, monkeypatch):
+    from jev_ultrafast import demo
+    from jev_ultrafast.secrets import secret_for
+
+    (tmp_path / ".env").write_text("# comment\nJEV_SECRETS='{\"Password\": \"p#ss word\"}'\n TEXT_MODEL = \"m\" \n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("JEV_SECRETS", raising=False)
+    monkeypatch.delenv("TEXT_MODEL", raising=False)
+    demo.load_environment()
+    assert secret_for("Password") == "p#ss word"
+    assert os.environ["TEXT_MODEL"] == "m"
