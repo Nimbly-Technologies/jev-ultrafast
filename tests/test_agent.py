@@ -372,27 +372,32 @@ def secret_field(runner):
                             "node": 40, "secret": True})
     p["actions"].insert(0, {"id": "pwc", "kind": "click", "label": "Open New password", "role": "textbox",
                             "value": "", "node": 40, "secret": True})
+    p["fingerprint"] = fingerprint(p)
     return p
 
 
 def test_a_secret_field_without_a_stored_entry_takes_its_value_from_the_goal(runner, monkeypatch):
     monkeypatch.setenv("JEV_SECRETS", '{"Password": "hunter2"}')
-    monkeypatch.setattr(loop, "field_text", Mock(return_value=("S3t-by-goal", {"model": "t", "latency_ms": 1})))
+    # A stand-in helper that can only answer from the goal it is given.
+    helper = Mock(side_effect=lambda context: (context["goal"].split()[-1], {"model": "t", "latency_ms": 1}))
+    monkeypatch.setattr(loop, "field_text", helper)
     p = secret_field(runner)
     runner.state["goal"] = "Register with the password S3t-by-goal"
     runner.state["decision"] = decision("pw")
     runner.command("act", {"fingerprint": p["fingerprint"]})
+    assert helper.call_args.args[0]["goal"] == "Register with the password S3t-by-goal"
     assert runner.state["browser"].act.call_args.kwargs["text"] == "S3t-by-goal"
     assert "S3t-by-goal" not in json.dumps(runner.state["history"] + runner.state["text_calls"])
 
 
 def test_a_field_with_no_value_anywhere_stops_the_run_cleanly(runner, monkeypatch):
     monkeypatch.setenv("JEV_SECRETS", "{}")
-    monkeypatch.setattr(loop, "field_text", Mock(side_effect=ValueError("Text helper returned no valid field value")))
+    no_value = model.NoFieldValue("Text helper returned no valid field value")
+    monkeypatch.setattr(loop, "field_text", Mock(side_effect=no_value))
     p = secret_field(runner)
     runner.state["decision"] = decision("pw")
     runner.command("act", {"fingerprint": p["fingerprint"]})
-    assert runner.state["status"] == "blocked" and "no valid field value" in runner.state["error"]
+    assert runner.state["status"] == "blocked" and "No secret stored" in runner.state["error"]
     runner.state["browser"].act.assert_not_called()
 
 
@@ -401,3 +406,11 @@ def test_clicking_a_password_field_is_not_recorded_as_a_secret(runner, monkeypat
     runner.state["decision"] = decision("pwc")
     runner.command("act", {"fingerprint": p["fingerprint"]})
     assert runner.state["history"][-1]["text"] is None
+
+
+def test_a_missing_text_model_key_is_not_mistaken_for_a_missing_value(runner, monkeypatch):
+    monkeypatch.delenv("TEXT_MODEL_API_KEY", raising=False)
+    p = runner.state["page"]
+    runner.state["decision"] = decision("e1")
+    with pytest.raises(ValueError, match="TEXT_MODEL_API_KEY"):
+        runner.command("act", {"fingerprint": p["fingerprint"]})

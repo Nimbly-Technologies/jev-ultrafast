@@ -12,6 +12,10 @@ from .questions import NEXT_ACTION, TARGET, TEXT_VALUE
 CLIENT = httpx.Client(http2=True, timeout=25)
 
 
+class NoFieldValue(ValueError):
+    """The text helper found no value for the field in the goal. Nothing was typed."""
+
+
 def post_json(url, key, body):
     for attempt in range(3):
         try:
@@ -195,7 +199,7 @@ def field_text(context):
         if set(output) != {"text"} or not isinstance(value, str) or not value.strip() or len(value) > 2000:
             raise ValueError()
     except (ValueError, KeyError, TypeError):
-        raise ValueError("Text helper returned no valid field value; nothing typed.") from None
+        raise NoFieldValue("Text helper returned no valid field value; nothing typed.") from None
     return value, {
         "model": model,
         "latency_ms": round((time.perf_counter() - started) * 1000),

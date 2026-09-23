@@ -124,7 +124,7 @@ def main():
                          "document.querySelector('#suggestions').innerHTML='<div role=option>Generated</div>'"
                          "},60))")
         page = browser.observe(screenshot=False)
-        field = next(a for a in page["actions"] if a["kind"] == "fill")
+        field = next(a for a in page["actions"] if a["kind"] == "fill" and not a.get("secret"))
         browser.act(field, page, text="Generated")
         page = browser.observe(screenshot=False)
         value = browser.evaluate("document.querySelector('#query').value")
