@@ -40,15 +40,20 @@ def load_environment():
 
 
 def env_value(raw):
-    """A quoted value runs to its closing quote: the last matching quote followed only by whitespace or a comment,
-    so an apostrophe inside it ("it's") is kept. An unquoted value ends before a " #" comment."""
+    """A quoted value runs to its closing quote: the last matching (unescaped) quote followed only by whitespace or
+    a comment, so an apostrophe inside it ("it's") is kept. An unquoted value ends before a " #" comment."""
     raw = raw.strip()
     if raw[:1] in ("'", '"'):
+        double = raw[0] == '"'
+        # In double quotes a quote is escaped only by an odd run of backslashes ("a\\\\" ends at its last quote).
         closings = [i for i in range(1, len(raw)) if raw[i] == raw[0]
+                    and not (double and (len(raw[:i]) - len(raw[:i].rstrip("\\"))) % 2)
                     and (not raw[i + 1:].strip() or raw[i + 1:].lstrip().startswith("#"))]
         if not closings:
             raise ValueError(f"Unclosed {raw[0]} quote in a .env value")
-        return raw[1:closings[-1]]
+        value = raw[1:closings[-1]]
+        # Double quotes allow \" and \\ escapes, as dotenv does; single quotes are literal.
+        return re.sub(r'\\(["\\])', r"\1", value) if double else value
     comment = re.search(r"\s#", raw)
     return raw[:comment.start()].rstrip() if comment else raw
 
