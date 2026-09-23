@@ -608,6 +608,9 @@ def test_the_inspector_loads_a_quoted_json_secret_as_json(tmp_path, monkeypatch)
     demo.load_environment()
     assert secret_for("Password") == "p#ss word"
     assert os.environ["TEXT_MODEL"] == "m"
+    # load_environment() writes os.environ directly, which monkeypatch does not track: remove what it loaded.
+    monkeypatch.delenv("JEV_SECRETS")
+    monkeypatch.delenv("TEXT_MODEL")
 
 
 @pytest.mark.parametrize(("raw", "value"), [
