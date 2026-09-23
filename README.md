@@ -145,6 +145,23 @@ The same policy opened the requested Wikipedia article in **2.798 s** and passed
 
 A `DONE` choice still requires independent outcome verification. The DOM reader handles common HTML and ARIA controls, not the full accessible-name specification. Shadow roots, frames, canvas, uploads, pop-up tabs, nested scrolling, and arbitrary keyboard widgets remain outside this MVP. Owned tabs share the existing Chrome profile.
 
+## Android Maestro healing adapter
+
+`jev-mobile-adapter` exposes Jev's existing TypeSafe operation and target policy through a loopback HTTP endpoint for the Nimbly Maestro fork. Maestro remains responsible for reading Android accessibility state, validating the selected candidate, and performing the tap; Jev selects one offered candidate through the same `model.choose` policy used by the browser agent.
+
+Start it from this worktree:
+
+```bash
+uv sync
+uv run jev-mobile-adapter
+```
+
+The default endpoint is `http://127.0.0.1:8767/v1/mobile/heal`. The server binds only to loopback, rejects request bodies over 64 KiB or candidate lists over 32 entries, and makes one provider attempt with a 3 s model timeout and no retry; Maestro bounds the complete local request to 4 s; it does not log selectors, labels, request bodies, or model responses. Model credentials remain in the normal Jev environment and never belong in a Maestro flow.
+
+The forked Maestro runner opts in with a top-level `jevHealing` block. It calls the adapter only after a plain Android element `tapOn` lookup fails. Sensitive selector and candidate values are redacted before they leave the runner while safe semantic labels are retained. Jev must return `CLICK` for one enabled, visible candidate with operation and target confidence at least 0.70, with a target margin at least 0.15. Otherwise Maestro keeps the original lookup error. A successful choice executes one normal element tap and writes sanitized healing metadata to the command debug output.
+
+Assertions, text entry, point or relative taps, long presses, repeats, retry-on-no-change, wait-until-visible, and actions that may already have changed state are deliberately outside this pilot. The adapter tests are offline; starting the server with a live model key is a separate local operation.
+
 ## Development
 
 ```bash
