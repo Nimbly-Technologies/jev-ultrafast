@@ -320,20 +320,21 @@ def test_navigation_during_prediction_reobserves_without_action(runner):
     runner.state["browser"].act.assert_not_called()
 
 
-def test_secret_value_comes_from_the_vault_by_label(monkeypatch):
+def test_secret_value_matches_its_exact_label_only(monkeypatch):
     from jev_ultrafast.secrets import secret_for
 
-    monkeypatch.setenv("JEV_SECRETS", '{"password": "hunter2"}')
-    assert secret_for("Password") == "hunter2"
-    with pytest.raises(ValueError, match="No secret configured"):
-        secret_for("Email")
+    monkeypatch.setenv("JEV_SECRETS", '{"Password": "hunter2", "user": "ada"}')
+    assert secret_for("password") == secret_for("Password *") == secret_for(" Password: ") == "hunter2"
+    assert secret_for("Confirm password") is None  # Never a substring match.
+    assert secret_for("Username") is None
+    assert secret_for("Email") is None
     monkeypatch.setenv("JEV_SECRETS", "not json")
     with pytest.raises(ValueError, match="not valid JSON"):
         secret_for("Password")
 
 
 def test_secret_field_is_typed_from_the_vault_and_masked_in_history(runner, monkeypatch):
-    monkeypatch.setenv("JEV_SECRETS", '{"password": "hunter2"}')
+    monkeypatch.setenv("JEV_SECRETS", '{"Password": "hunter2"}')
     helper = Mock()
     monkeypatch.setattr(loop, "field_text", helper)
     p = runner.state["page"]
@@ -363,3 +364,40 @@ def test_policy_is_told_which_fields_are_secret(monkeypatch):
     assert seen["state"]["elements"][0]["secret"] is True
     assert seen["questions"]["type_text_target"]["criteria"]["1"]["secret"] is True
     assert "secret" in seen["questions"]["operation"]["criteria"]["TYPE_TEXT"]
+
+
+def secret_field(runner):
+    p = runner.state["page"]
+    p["actions"].insert(0, {"id": "pw", "kind": "fill", "label": "New password", "role": "textbox", "value": "",
+                            "node": 40, "secret": True})
+    p["actions"].insert(0, {"id": "pwc", "kind": "click", "label": "Open New password", "role": "textbox",
+                            "value": "", "node": 40, "secret": True})
+    return p
+
+
+def test_a_secret_field_without_a_stored_entry_takes_its_value_from_the_goal(runner, monkeypatch):
+    monkeypatch.setenv("JEV_SECRETS", '{"Password": "hunter2"}')
+    monkeypatch.setattr(loop, "field_text", Mock(return_value=("S3t-by-goal", {"model": "t", "latency_ms": 1})))
+    p = secret_field(runner)
+    runner.state["goal"] = "Register with the password S3t-by-goal"
+    runner.state["decision"] = decision("pw")
+    runner.command("act", {"fingerprint": p["fingerprint"]})
+    assert runner.state["browser"].act.call_args.kwargs["text"] == "S3t-by-goal"
+    assert "S3t-by-goal" not in json.dumps(runner.state["history"] + runner.state["text_calls"])
+
+
+def test_a_field_with_no_value_anywhere_stops_the_run_cleanly(runner, monkeypatch):
+    monkeypatch.setenv("JEV_SECRETS", "{}")
+    monkeypatch.setattr(loop, "field_text", Mock(side_effect=ValueError("Text helper returned no valid field value")))
+    p = secret_field(runner)
+    runner.state["decision"] = decision("pw")
+    runner.command("act", {"fingerprint": p["fingerprint"]})
+    assert runner.state["status"] == "blocked" and "no valid field value" in runner.state["error"]
+    runner.state["browser"].act.assert_not_called()
+
+
+def test_clicking_a_password_field_is_not_recorded_as_a_secret(runner, monkeypatch):
+    p = secret_field(runner)
+    runner.state["decision"] = decision("pwc")
+    runner.command("act", {"fingerprint": p["fingerprint"]})
+    assert runner.state["history"][-1]["text"] is None

@@ -85,8 +85,8 @@ def choose(state, goal, history):
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
         "TYPE_TEXT": (
             "Enter or replace text in an editable field. A small LLM will supply the value from the goal. "
-            "An element marked secret is filled from local secure storage instead, so choose it even "
-            "though the goal never states its value."
+            "An element marked secret is filled from local secure storage when it has an entry there, so "
+            "choose it even though the goal never states its value."
         ),
         "SELECT": "Select an observed dropdown value.",
     }
