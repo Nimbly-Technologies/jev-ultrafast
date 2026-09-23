@@ -1,9 +1,10 @@
 """Local-browser freshness/execution regressions. No model calls or external websites."""
 
+import json
 import time
 from urllib.parse import quote
 
-from jev_ultrafast.browser import Browser, StalePage
+from jev_ultrafast.browser import Browser, StalePage, wait_limits
 
 HTML = """<!doctype html><title>Guard checks</title>
 <style>body{margin:30px}button{width:180px;height:50px}#outside{position:absolute;top:3000px}</style>
@@ -12,6 +13,7 @@ HTML = """<!doctype html><title>Guard checks</title>
 <label>City<input id="field" value="Zurich"></label>
 <label><input id="toggle" type="checkbox">Refundable</label>
 <select aria-label="Category"><option>All</option><option>Design</option></select>
+<label>Password<input id="pw" type="password"></label>
 <div id="card" style="cursor:pointer" onclick="window.cards=(window.cards||0)+1"><span>Issue Insights</span>
 <span>Spot trends</span></div>
 <nav><div id="menu" style="cursor:pointer;position:relative;width:200px">User Management
@@ -26,7 +28,12 @@ def main():
     browser = Browser("data:text/html," + quote(HTML))
     passed = []
     try:
+        browser.evaluate("document.querySelector('#pw').value='hunter2'")
         page = browser.observe(screenshot=False)
+        password = next(a for a in page["actions"] if a["label"] == "Password" and a["kind"] == "fill")
+        assert password.get("secret") is True and password["role"] == "textbox" and password["value"] == "(filled)"
+        assert "hunter2" not in json.dumps(page), "a password value left the page"
+        passed.append("a password field is a masked, secret textbox and its value never leaves the page")
         action = next(a for a in page["actions"] if a["label"] == "Continue")
         browser.evaluate("document.querySelector('#target').style.transform='translateX(200px)'")
         assert browser.fresh(page), "Movement should use fresh geometry, not another model call"
@@ -168,8 +175,18 @@ def main():
                          "p.textContent='Loaded'; document.body.prepend(p); window.__jevInflight=0},1200)")
         started = time.monotonic()
         browser.wait_for_change(page)
-        assert time.monotonic() - started >= 1.2 and "Loaded" in browser.observe(screenshot=False)["text"]
-        passed.append("WAIT outlasts an in-flight request and returns once the page settles")
+        elapsed = time.monotonic() - started
+        quiet_timeout, _ = wait_limits()
+        # The upper bound matters: with a dead counter WAIT would still return, but only at the quiet timeout.
+        assert 1.2 <= elapsed < min(quiet_timeout, 3), elapsed
+        assert "Loaded" in browser.observe(screenshot=False)["text"]
+        passed.append("WAIT outlasts an in-flight request and returns as soon as the page settles")
+        browser.evaluate("try { new XMLHttpRequest().send() } catch (_) {}")
+        assert browser.evaluate("window.__jevInflight") == 0
+        passed.append("a request that throws before dispatch does not leave WAIT believing the page is busy")
+        browser.evaluate("dispatchEvent(new Event('beforeunload'))")
+        assert browser.busy()
+        passed.append("a navigation under way counts as busy")
         # The page scrolls inside a container, not the window; a select-style combobox shows its choice beside
         # an empty input.
         browser.evaluate("""document.body.innerHTML='<div id=\"pane\" style=\"height:600px;overflow-y:auto\">'+

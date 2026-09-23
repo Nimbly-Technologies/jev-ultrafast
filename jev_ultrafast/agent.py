@@ -144,19 +144,27 @@ class Agent:
             if len(state["history"]) >= max_steps:
                 self._stop(f"Stopped at the {max_steps}-action budget")
             text, helper = None, None
-            if action["kind"] == "fill" and action.get("secret") and not quoted_value(state):
-                # A secret is read locally and typed. No model sees it, and the trace records only a mask.
+            secret = action["kind"] == "fill" and action.get("secret")
+            if secret and not quoted_value(state):
+                # A stored secret is read locally and typed. No model sees it, and the trace records only a mask.
                 text = secret_for(action["label"])
-            elif action["kind"] == "fill":
+            if action["kind"] == "fill" and text is None:
+                # Any other field, and a secret field with no stored entry (or one the step quotes a new value for),
+                # takes its value from the goal.
                 if not state["browser"].fresh(page):
                     raise StalePage("Page changed before text generation. Choose again.")
                 context = field_context(state["goal"], action, page, state["history"])
                 if self.pending_text and self.pending_text[0] == context:
                     _, text, helper = self.pending_text
                 else:
-                    text, helper = field_text(context)
+                    try:
+                        text, helper = field_text(context)
+                    except ValueError as missing:
+                        # Nothing was typed; stop cleanly rather than re-choosing the same field forever.
+                        self._stop(str(missing))
                     self.pending_text = (context, text, helper)
-                    state["text_calls"].append({**helper, "field": action["label"], "value": text})
+                    state["text_calls"].append({**helper, "field": action["label"],
+                                                "value": MASK if secret else text})
             # Browser.act checks freshness immediately before input, including after text generation.
             state["browser"].act(action, page, text=text)
             self.pending_text = None
@@ -171,7 +179,7 @@ class Agent:
                     "probability": decision["probabilities"][selected],
                     "confidence": decision["confidence"],
                     "latency_ms": decision["latency_ms"],
-                    "text": MASK if action.get("secret") else text,
+                    "text": MASK if secret else text,
                     "text_helper": helper["model"] if helper else None,
                     "text_latency_ms": helper["latency_ms"] if helper else 0,
                     "operation": decision["operation"],

@@ -12,12 +12,20 @@ from .cdp import cdp, connection
 # Atomically read visible content and controls, preserving actual DOM node identity.
 READ_STATE = Path(__file__).with_name("snapshot.js").read_text()
 MARKER = f"(() => {{ const state={READ_STATE}; return state?.marker ?? null; }})()"
-# How long a WAIT gives a quiet page to change; while requests are in flight it waits up to JEV_WAIT_MAX.
-WAIT_TIMEOUT = float(os.environ.get("JEV_WAIT_TIMEOUT", "3"))
-WAIT_MAX = float(os.environ.get("JEV_WAIT_MAX", "15"))
 # A changed page counts as settled once the network has been quiet this long.
 SETTLE_S = 0.3
-# Counts the page's own fetch/XHR requests still in flight, so WAIT can tell "loading" from "stuck".
+# A navigation that started this long ago without a new document is treated as stalled, not in flight.
+NAVIGATION_GRACE_MS = 15000
+
+
+def wait_limits():
+    """(quiet timeout, hard cap), read when a WAIT runs so a .env loaded after import still applies: how long a
+    WAIT gives a quiet page to change, and how long it may wait while requests are in flight."""
+    return float(os.environ.get("JEV_WAIT_TIMEOUT", "3")), float(os.environ.get("JEV_WAIT_MAX", "15"))
+
+
+# Counts the page's own fetch/XHR requests in flight, and marks a navigation that has started (a form submit,
+# a redirect) until the next document replaces this one, so WAIT can tell "loading" from "stuck".
 TRACK_REQUESTS = """(() => {
   if (window.__jevInflight !== undefined) return;
   window.__jevInflight = 0;
@@ -25,14 +33,17 @@ TRACK_REQUESTS = """(() => {
   const fetch = window.fetch;
   if (fetch) window.fetch = function (...args) {
     window.__jevInflight++;
-    return fetch.apply(this, args).finally(done);
+    try { return fetch.apply(this, args).finally(done); } catch (error) { done(); throw error; }
   };
   const send = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function (...args) {
     window.__jevInflight++;
-    this.addEventListener('loadend', done, {once: true});
-    return send.apply(this, args);
+    try {
+      this.addEventListener('loadend', done, {once: true});
+      return send.apply(this, args);
+    } catch (error) { done(); throw error; }
   };
+  addEventListener('beforeunload', () => { window.__jevNavigating = Date.now(); });
 })()"""
 
 class StalePage(ValueError):
@@ -212,9 +223,13 @@ class Browser:
         return result
 
     def busy(self):
+        """Requests in flight, a navigation under way, or a document mid-replacement (evaluation fails)."""
         try:
-            return bool(self.evaluate("window.__jevInflight || 0"))
-        except StalePage:
+            return bool(self.evaluate(
+                "(window.__jevInflight || 0) > 0 || "
+                f"(!!window.__jevNavigating && Date.now() - window.__jevNavigating < {NAVIGATION_GRACE_MS})"
+            ))
+        except (StalePage, RuntimeError):
             return True
 
     def wait_for_change(self, page):
@@ -222,11 +237,12 @@ class Browser:
         otherwise burns one model call per tick and looks like a stuck page, and the policy wanders off.
 
         Returns once the page has changed and the network has been quiet for SETTLE_S; or, if nothing
-        changes, after WAIT_TIMEOUT of quiet. While requests are in flight it keeps waiting, up to WAIT_MAX.
+        changes, after JEV_WAIT_TIMEOUT of quiet. While busy it keeps waiting, up to JEV_WAIT_MAX.
         """
+        timeout, cap = wait_limits()
         started = time.monotonic()
         quiet_since = started
-        while time.monotonic() - started < WAIT_MAX:
+        while time.monotonic() - started < cap:
             time.sleep(0.05)
             now = time.monotonic()
             if self.busy():
@@ -236,9 +252,9 @@ class Browser:
             quiet = now - quiet_since
             try:
                 changed = not self.fresh(page)
-            except StalePage:
+            except (StalePage, RuntimeError):
                 changed = True
-            if (changed and quiet >= SETTLE_S) or quiet >= WAIT_TIMEOUT:
+            if (changed and quiet >= SETTLE_S) or quiet >= timeout:
                 return
 
     def close(self):
