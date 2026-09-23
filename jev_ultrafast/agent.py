@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from .browser import Browser, StalePage
-from .model import action_space, choose, field_context, field_text
+from .model import NoFieldValue, action_space, choose, field_context, field_text
 from .questions import MAX_STEPS, NEXT_ACTION, STEP
 from .secrets import MASK, secret_for
 
@@ -159,9 +159,9 @@ class Agent:
                 else:
                     try:
                         text, helper = field_text(context)
-                    except ValueError as missing:
+                    except NoFieldValue as missing:
                         # Nothing was typed; stop cleanly rather than re-choosing the same field forever.
-                        self._stop(str(missing))
+                        self._stop(no_value_reason(action, secret, missing))
                     self.pending_text = (context, text, helper)
                     state["text_calls"].append({**helper, "field": action["label"],
                                                 "value": MASK if secret else text})
@@ -344,3 +344,12 @@ def diagnose(history):
                               and h["kind"] not in PASSIVE],
         "waits": sum(h["kind"] == "wait" for h in history),
     }
+
+
+def no_value_reason(action, secret, missing):
+    """Why a field could not be filled. A password field with no stored entry is almost always a JEV_SECRETS key
+    that does not match its label, so say that rather than blaming the text helper."""
+    if secret:
+        return (f"No secret stored for the password field {action['label']!r} (JEV_SECRETS keys match the label "
+                "exactly) and the goal gives no value for it; nothing typed.")
+    return str(missing)

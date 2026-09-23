@@ -17,6 +17,10 @@ RETRY_STATUSES = {408, 429} | set(range(500, 600))
 ATTEMPTS = 4
 
 
+class NoFieldValue(ValueError):
+    """The text helper found no value for the field in the goal. Nothing was typed."""
+
+
 def post_json(url, key, body):
     for attempt in range(ATTEMPTS):
         last = attempt == ATTEMPTS - 1
@@ -202,7 +206,7 @@ def parse_field_value(result):
         if set(output) != {"text"} or not isinstance(value, str) or not value.strip() or len(value) > 2000:
             raise ValueError()
     except (ValueError, KeyError, TypeError):
-        raise ValueError("Text helper returned no valid field value; nothing typed.") from None
+        raise NoFieldValue("Text helper returned no valid field value; nothing typed.") from None
     return value
 
 
