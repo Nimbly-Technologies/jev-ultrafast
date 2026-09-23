@@ -3,7 +3,7 @@
 import time
 from urllib.parse import quote
 
-from jev_ultrafast.browser import Browser, StalePage
+from jev_ultrafast.browser import Browser, StalePage, wait_limits
 
 HTML = """<!doctype html><title>Guard checks</title>
 <style>body{margin:30px}button{width:180px;height:50px}#outside{position:absolute;top:3000px}</style>
@@ -131,8 +131,18 @@ def main():
                          "p.textContent='Loaded'; document.body.prepend(p); window.__jevInflight=0},1200)")
         started = time.monotonic()
         browser.wait_for_change(page)
-        assert time.monotonic() - started >= 1.2 and "Loaded" in browser.observe(screenshot=False)["text"]
-        passed.append("WAIT outlasts an in-flight request and returns once the page settles")
+        elapsed = time.monotonic() - started
+        quiet_timeout, _ = wait_limits()
+        # The upper bound matters: with a dead counter WAIT would still return, but only at the quiet timeout.
+        assert 1.2 <= elapsed < min(quiet_timeout, 3), elapsed
+        assert "Loaded" in browser.observe(screenshot=False)["text"]
+        passed.append("WAIT outlasts an in-flight request and returns as soon as the page settles")
+        browser.evaluate("try { new XMLHttpRequest().send() } catch (_) {}")
+        assert browser.evaluate("window.__jevInflight") == 0
+        passed.append("a request that throws before dispatch does not leave WAIT believing the page is busy")
+        browser.evaluate("dispatchEvent(new Event('beforeunload'))")
+        assert browser.busy()
+        passed.append("a navigation under way counts as busy")
         browser.call("Page.navigate", url="about:blank")
         assert not browser.fresh(page, field)
         passed.append("navigation invalidates the old document")
