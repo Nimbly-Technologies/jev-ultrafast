@@ -10,19 +10,30 @@ Everything site-specific lives there, not here.
 
 ## What diverges, and why
 
-| Change | Why | Offered upstream |
+Each change has an offline unit test or a browser guard check (`scripts/check_guards.py`, 31 checks).
+
+### Offered upstream
+
+| Change | Why | Upstream |
 | --- | --- | --- |
-| Raw CDP client (`cdp.py`) replaces browser-harness | One WebSocket, no daemon; optional SSH tunnel (`CDP_SSH`) to a remote Chrome | no, a design choice upstream may not want |
-| Agent owns a window, not a background tab | An occluded tab gets ~2 animation frames/s (0 when headless), freezing menus mid-fade | with the CDP change |
-| Password fields observable, values masked; `JEV_SECRETS` vault | Stock jev cannot log in anywhere; the secret never reaches a model, trace or history | [#123](https://github.com/browser-use/jev-ultrafast/pull/123) |
-| `WAIT` waits for the page to change and the network to settle (`JEV_WAIT_TIMEOUT` 3 s quiet, `JEV_WAIT_MAX` 15 s) | A 100 ms tick burned one model call per tick on a slow redirect, then the policy wandered | [#124](https://github.com/browser-use/jev-ultrafast/pull/124) |
-| One retry for an unparseable text-helper value | Aborted whole runs; nothing is typed yet | no, [#73](https://github.com/browser-use/jev-ultrafast/pull/73) covers retries |
-| One retry for an invalid TypeSafe answer | Same failure on the choice head; nothing has executed yet | no, as above |
-| `Agent(browser=...)`, `pursue(goal)`, `act(instruction)` | A test interleaves goals with its own assertions on one page; `act` executes exactly one action, like Stagehand's `act()` | maybe |
-| Step, model-call and wall-clock budgets; stop reasons; `diagnose()` | A wandering run must not spend unbounded money, and a flake must say why it stopped | maybe |
-| `Browser.goto/run/click_at/press/insert_text/screenshot`, `isolated_context()` | The deterministic escape hatch a test uses for steps it already knows, and per-test isolation | no |
-| Scripted clickable elements (outermost `cursor: pointer`) observed as buttons | Cards, tiles and avatars with a script handler and no role were invisible | no, [#22](https://github.com/browser-use/jev-ultrafast/pull/22)/[#24](https://github.com/browser-use/jev-ultrafast/pull/24) are open |
-| `JEV_VIEWPORT` | The QA suite runs at 1280x800, as its Stagehand predecessor did | no |
+| Password fields observable, values masked everywhere the page is serialised; `JEV_SECRETS` vault matched on the exact label (ignoring case and a trailing `*` or `:`); a password field with no stored entry takes its value from the goal; a field with no value anywhere stops the run as blocked, naming the likely cause | Stock jev cannot log in anywhere; the secret never reaches a model, trace or history, and `Password` never fills `Confirm password` | [#123](https://github.com/browser-use/jev-ultrafast/pull/123) |
+| `WAIT` returns once the page has changed and the network is quiet (`JEV_WAIT_TIMEOUT` 3 s of quiet, `JEV_WAIT_MAX` 15 s cap); in-flight fetch/XHR and a started navigation count as busy; limits read when a WAIT runs | A 100 ms tick burned one model call per tick on a slow redirect, then the policy wandered | [#124](https://github.com/browser-use/jev-ultrafast/pull/124) |
+
+### Not offered (a design choice upstream may not want, or already proposed there by others)
+
+| Change | Why |
+| --- | --- |
+| Raw CDP client (`cdp.py`) replaces browser-harness; the agent owns a window, not a background tab | One WebSocket, no daemon, optional SSH tunnel (`CDP_SSH`); an occluded tab gets ~2 animation frames/s (0 headless), freezing menus mid-fade |
+| `Agent(browser=...)`, `pursue(goal)`, `act(instruction)`; `act()` frames its instruction with single-step rules (`STEP`) | A test interleaves goals with its own checks on one page; under the multi-step rules the policy refused a plainly visible Save button because other required fields "looked empty" |
+| Step, model-call and wall-clock budgets; stop reasons; `diagnose()` | A wandering run must not spend unbounded money, and a flake must say why it stopped |
+| A step that quotes a value for a password field types that value, not the stored secret | Creating a user must never hand it the QA account's own password |
+| Retries: an invalid TypeSafe answer or unparseable text-helper value once; 408, 429, every 5xx and dropped connections up to 4 times with backoff | Nothing has executed while a model call is in flight; a Cloudflare 520 failed two CI steps (upstream [#73](https://github.com/browser-use/jev-ultrafast/pull/73) covers some of this) |
+| A refused target (covered by a toast, moved, page navigating) waits for the page to change before the next model call | The same refused choice burned a 6-call budget in 2-3 s |
+| Scripted clickable elements: the outermost `cursor: pointer` element, and anything with an `onclick` property (React sets one for every `onClick`), observed as buttons; a scripted menu nested in its trigger split into its items | Cards, tiles, avatars, section headers and hover-menu items were invisible (upstream [#22](https://github.com/browser-use/jev-ultrafast/pull/22)/[#24](https://github.com/browser-use/jev-ultrafast/pull/24) cover part of this) |
+| Off-screen controls offered (marked `offscreen`, at most 80, nearest first) and scrolled to the middle before input; pages that scroll a container, not the window, are scrollable | Stagehand reaches any target; a Save button above the fold was BLOCKED |
+| A select-style combobox (react-select) reports the choice it displays; a pixel-wide input is pressed through its visible container | The model saw every chosen dropdown as empty, and the 2 px input could not be hit |
+| Open dialogs' text is read first | A long table behind a modal crowded the dialog out of the 6000-character budget |
+| `Browser.goto/run/click_at/press/insert_text/screenshot`, `isolated_context()`, `JEV_VIEWPORT` | The deterministic escape hatch a test uses for steps it already knows, per-test isolation, the suite's 1280x800 viewport |
 
 ## API added for tests
 
