@@ -14,7 +14,9 @@ WAIT only when the needed control is absent/disabled, or submitted results are s
 If Search/Submit is visible and the required fields are ready, CLICK it immediately.
 Recent WAIT actions are not evidence of loading. Prefer a useful visible control over WAIT.
 DONE requires visible evidence that ALL requirements are satisfied. If asked to open a result,
-a matching link is not enough. BLOCKED means no supported operation can make progress."""
+a matching link is not enough. BLOCKED means no supported operation can make progress.
+If a control the goal needs is not offered and an offered SCROLL operation can reveal more content,
+use that supported operation instead of choosing BLOCKED."""
 
 STEP = """The goal is ONE explicit instruction from a caller who has already decided it is the right next step.
 Choose the operation and the element it names, even if other fields on the page look unfinished: judging the

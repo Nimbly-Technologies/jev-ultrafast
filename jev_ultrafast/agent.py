@@ -154,7 +154,10 @@ class Agent:
                 if not state["browser"].fresh(page):
                     raise StalePage("Page changed before text generation. Choose again.")
                 context = field_context(state["goal"], action, page, state["history"])
-                if self.pending_text and self.pending_text[0] == context:
+                # Keyed by element and document as well: two same-labeled fields build identical contexts, and node
+                # ids restart in a new document (page_key[0] is its performance.timeOrigin). Upstream #197.
+                key = (action["node"], (page.get("page_key") or [None])[0], context)
+                if self.pending_text and self.pending_text[0] == key:
                     _, text, helper = self.pending_text
                 else:
                     try:
@@ -162,7 +165,7 @@ class Agent:
                     except NoFieldValue as missing:
                         # Nothing was typed; stop cleanly rather than re-choosing the same field forever.
                         self._stop(no_value_reason(action, secret, missing))
-                    self.pending_text = (context, text, helper)
+                    self.pending_text = (key, text, helper)
                     state["text_calls"].append({**helper, "field": action["label"],
                                                 "value": MASK if secret else text})
             # Browser.act checks freshness immediately before input, including after text generation.
