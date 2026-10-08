@@ -34,6 +34,7 @@ Each change has an offline unit test or a browser guard check (`scripts/check_gu
 | A select-style combobox (react-select) reports the choice it displays; a pixel-wide input is pressed through its visible container | The model saw every chosen dropdown as empty, and the 2 px input could not be hit |
 | Open dialogs' text is read first | A long table behind a modal crowded the dialog out of the 6000-character budget |
 | `Browser.goto/run/click_at/press/insert_text/screenshot`, `isolated_context()`, `JEV_VIEWPORT` | The deterministic escape hatch a test uses for steps it already knows, per-test isolation, the suite's 1280x800 viewport |
+| `AndroidDevice` (`jev_ultrafast/android.py`, extra `android`): an Android screen as a page, so `Agent(browser=AndroidDevice(serial))` drives a phone over ADB with the same policy. The uiautomator2 accessibility tree becomes the indexed action space; adds BACK and SCROLL controls; a screen is named by its top heading | Drive audit-lite on a device the way the suite drives web-admin; a screen read takes 140-220 ms against 1-2 s for `uiautomator dump` |
 
 ## API added for tests
 
