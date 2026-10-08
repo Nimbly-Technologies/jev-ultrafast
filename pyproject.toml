@@ -7,6 +7,9 @@ license = "MIT"
 requires-python = ">=3.12"
 dependencies = ["httpx[http2]>=0.28,<1", "websockets>=15,<17"]
 
+[project.optional-dependencies]
+android = ["uiautomator2>=3.7,<4"]
+
 [project.scripts]
 jev = "jev_ultrafast.demo:main"
 jev-mobile-adapter = "jev_ultrafast.mobile_adapter:main"
