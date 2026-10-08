@@ -25,6 +25,8 @@ def page():
             {"id": "e3", "kind": "click", "label": "Go", "role": "button", "value": "", "node": 20},
             {"id": "wait", "kind": "wait", "label": "Wait"},
         ],
+        # page_key[0] is performance.timeOrigin: stable within one document, fresh after every full navigation.
+        "page_key": [1234.0, "https://example.test/", 0, 0, 0],
     }
     state["fingerprint"] = fingerprint(state)
     return state
@@ -210,6 +212,44 @@ def test_changed_field_context_does_not_reuse_generated_text(runner, monkeypatch
     runner.state["decision"] = decision()
     runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
     assert helper.call_count == 2
+
+
+def test_stale_text_cache_does_not_cross_same_labeled_fields(runner, monkeypatch):
+    """A value generated for one field must not be typed into another whose helper input is identical (#197)."""
+    runner.state["page"]["actions"] = [
+        {"id": "e1", "kind": "fill", "label": "Name", "role": "textbox", "value": "", "node": 10},
+        {"id": "e2", "kind": "fill", "label": "Name", "role": "textbox", "value": "", "node": 20},
+        {"id": "wait", "kind": "wait", "label": "Wait"},
+    ]
+    actions = runner.state["page"]["actions"]
+    assert model.field_context("Find a book", actions[0], runner.state["page"], []) == model.field_context(
+        "Find a book", actions[1], runner.state["page"], [])
+    helper = Mock(side_effect=[("John", {"model": "test", "latency_ms": 10}),
+                               ("Jane", {"model": "test", "latency_ms": 10})])
+    monkeypatch.setattr(loop, "field_text", helper)
+    runner.state["browser"].act.side_effect = [StalePage("Changed before input"), None]
+    with pytest.raises(StalePage):
+        runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    runner.state["decision"] = decision("e2")
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert [c.kwargs["text"] for c in runner.state["browser"].act.call_args_list] == ["John", "Jane"]
+
+
+def test_stale_text_cache_does_not_cross_navigation(runner, monkeypatch):
+    """Node ids restart in a new document, so the same id with identical context can name another field (#197)."""
+    old = runner.state["page"]
+    new = deepcopy(old)
+    new["page_key"] = [9999.0, *old["page_key"][1:]]
+    helper = Mock(side_effect=[("John", {"model": "test", "latency_ms": 10}),
+                               ("Jane", {"model": "test", "latency_ms": 10})])
+    monkeypatch.setattr(loop, "field_text", helper)
+    runner.state["browser"].act.side_effect = [StalePage("Changed before input"), None]
+    with pytest.raises(StalePage):
+        runner.command("act", {"fingerprint": old["fingerprint"]})
+    runner.state["page"] = new
+    runner.state["decision"] = decision("e1")
+    runner.command("act", {"fingerprint": new["fingerprint"]})
+    assert [c.kwargs["text"] for c in runner.state["browser"].act.call_args_list] == ["John", "Jane"]
 
 
 def test_loading_waits_do_not_trigger_no_progress_stop(runner):

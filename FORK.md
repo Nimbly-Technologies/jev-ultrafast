@@ -19,6 +19,15 @@ Each change has an offline unit test or a browser guard check (`scripts/check_gu
 | Password fields observable, values masked everywhere the page is serialised; `JEV_SECRETS` vault matched on the exact label (ignoring case and a trailing `*` or `:`); a password field with no stored entry takes its value from the goal; a field with no value anywhere stops the run as blocked, naming the likely cause | Stock jev cannot log in anywhere; the secret never reaches a model, trace or history, and `Password` never fills `Confirm password` | [#123](https://github.com/browser-use/jev-ultrafast/pull/123) |
 | `WAIT` returns once the page has changed and the network is quiet (`JEV_WAIT_TIMEOUT` 3 s of quiet, `JEV_WAIT_MAX` 15 s cap); in-flight fetch/XHR and a started navigation count as busy; limits read when a WAIT runs | A 100 ms tick burned one model call per tick on a slow redirect, then the policy wandered | [#124](https://github.com/browser-use/jev-ultrafast/pull/124) |
 
+### Taken from upstream pull requests
+
+Ported while still open upstream. Drop the row once upstream merges it and the fork rebases.
+
+| Change | Why | Upstream |
+| --- | --- | --- |
+| The stale-retry TYPE_TEXT cache is keyed by element and document (`node`, `page_key[0]`), not only by the helper input | Two same-labeled fields build identical helper input, so a value generated for one was typed into the other after a stale retry | [#197](https://github.com/browser-use/jev-ultrafast/pull/197) (ported by hand: the fork's cache also handles `NoFieldValue`) |
+| `NEXT_ACTION` tells the policy to scroll for a control that is not offered rather than choose BLOCKED | With a scroll offered, the policy still ended runs BLOCKED when the control it needed sat below the fold | [#195](https://github.com/browser-use/jev-ultrafast/pull/195) |
+
 ### Not offered (a design choice upstream may not want, or already proposed there by others)
 
 | Change | Why |
@@ -55,5 +64,16 @@ page.close()                                      # also closes any window the p
 satisfied and executed nothing. `diagnose()` reports repeated actions, URL revisits and no-change actions;
 it never changes a run's outcome.
 
-Upstream has not merged an outside pull request yet (only maintainer commits through #30), so everything
-above is carried here until it does.
+## Upstream status
+
+Last checked 2026-10-08. `main` has not moved since #30 (2026-09-18), the commit this fork is based on, so a
+rebase brings in nothing. Upstream has not merged an outside pull request; about 150 sit open, so everything
+above is carried here until it does. The maintainers' `codex/planner-loop` and `codex/state-action-hillclimb`
+branches (last touched 2026-09-17) redesign the decision step into one joint operation/target choice. They are
+not ported: their own READMEs report 2-3 of 20 supported completions at up to 3x the cost, and "general
+reliability remains poor". To recheck:
+
+```bash
+git fetch upstream && git log --oneline nimbly..upstream/main
+gh pr list -R browser-use/jev-ultrafast --state merged --limit 5
+```
