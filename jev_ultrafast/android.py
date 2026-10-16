@@ -155,12 +155,18 @@ class AndroidDevice:
             left, top, right, bottom = action["area"]
             x, span = (left + right) // 2, (bottom - top) * 0.3
             mid = (top + bottom) / 2
-            self.d.swipe(x, mid + span * action["dy"], x, mid - span * action["dy"], duration=0.15)
+            # d.swipe injects via InputManager.getInstance, gone on Android 16
+            self.d.shell(f"input swipe {x} {int(mid + span * action['dy'])} {x} {int(mid - span * action['dy'])} 150")
         else:
             left, top, right, bottom = action["bounds"]
             self.d.click((left + right) // 2, (top + bottom) // 2)
             if kind == "fill":
-                self.d.send_keys(text or "", clear=True)
+                field = self.d(focused=True)
+                # send_keys(clear=True) injects keys via InputManager.getInstance, gone on Android 16
+                if field.exists:
+                    field.set_text(text or "")
+                else:
+                    self.d.send_keys(text or "", clear=True)
         self.acted = True
 
     def text(self):
