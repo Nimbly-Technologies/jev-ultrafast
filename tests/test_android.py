@@ -34,3 +34,53 @@ def test_fingerprint_ignores_bounds():
     moved = [{**a, "bounds": [0, 0, 1, 1]} if "bounds" in a else a for a in actions]
     page = {"url": "android://com.example", "text": text}
     assert fingerprint({**page, "actions": actions}) == fingerprint({**page, "actions": moved})
+
+
+class FakeField:
+    def __init__(self, calls, exists):
+        self.calls, self.exists = calls, exists
+
+    def set_text(self, text):
+        self.calls.append(("set_text", text))
+
+
+class FakeD:
+    # Records input calls; the jsonrpc key/swipe injectors are absent so using them fails the test.
+    def __init__(self, focused):
+        self.calls, self.focused = [], focused
+
+    def __call__(self, focused):
+        return FakeField(self.calls, self.focused)
+
+    def click(self, x, y):
+        self.calls.append(("click", x, y))
+
+    def shell(self, cmd):
+        self.calls.append(("shell", cmd))
+
+    def send_keys(self, text, clear=False):
+        self.calls.append(("send_keys", text, clear))
+
+
+def device(focused=True):
+    from jev_ultrafast.android import AndroidDevice
+
+    phone = AndroidDevice.__new__(AndroidDevice)
+    phone.d, phone.acted, phone.fresh = FakeD(focused), False, lambda page, action=None: True
+    return phone
+
+
+def test_fill_sets_text_on_focused_field():
+    # Android 16 removed InputManager.getInstance, which send_keys(clear=True) needs.
+    phone = device()
+    phone.act({"kind": "fill", "bounds": [0, 0, 100, 50]}, {}, "hi")
+    assert phone.d.calls == [("click", 50, 25), ("set_text", "hi")]
+    phone = device(focused=False)
+    phone.act({"kind": "fill", "bounds": [0, 0, 100, 50]}, {}, "hi")
+    assert phone.d.calls[-1] == ("send_keys", "hi", True)
+
+
+def test_scroll_uses_input_swipe():
+    phone = device()
+    phone.act({"kind": "scroll", "area": [0, 0, 1000, 1000], "dy": 1}, {})
+    assert phone.d.calls == [("shell", "input swipe 500 800 500 200 150")]
